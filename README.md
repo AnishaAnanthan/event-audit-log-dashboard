@@ -43,8 +43,8 @@ event-audit-dashboard/
 │
 ├── backend/
 ├── frontend/
-    ├── user-app/
-    └── admin-dashboard/
+|   ├── user-app/
+|   └── admin-dashboard/
 
 **Security Considerations**
     Role-based access control
