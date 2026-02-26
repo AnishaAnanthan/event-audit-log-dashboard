@@ -39,6 +39,11 @@ const eventSchema = new mongoose.Schema(
     createdBy: {
       type: String,
       default: "system"
+    },
+
+    updatedBy: {
+      type: String,
+      default: "system"
     }
   },
   { timestamps: true }

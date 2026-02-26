@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "test:e2e": "playwright test tests/e2e --project=chromium",
+    "test:api": "playwright test tests/api --project=api",
+    "test:all": "playwright test"
+  },
+  "dependencies": {
+    "axios": "^1.13.5",
+    "chart.js": "^4.5.1",
+    "express-mongo-sanitize": "^2.2.0",
+    "google-auth-library": "^10.5.0",
+    "helmet": "^8.1.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "react-chartjs-2": "^5.3.1",
+    "react-router-dom": "^7.13.0",
+    "xss-clean": "^0.1.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@types/node": "^24.3.0"
+  }
+}
