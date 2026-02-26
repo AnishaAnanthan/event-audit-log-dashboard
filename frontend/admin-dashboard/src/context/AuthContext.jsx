@@ -2,7 +2,7 @@ import { createContext, useState } from "react";
 import axios from "axios";
 
 export const AuthContext = createContext();
-const API = axios.create({ baseURL: "http://localhost:5000" }); // Ensure this matches your backend terminal output
+const API = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5000" }); // Ensure this matches your backend terminal output
 
 const getInitialAdmin = () => {
   try {
