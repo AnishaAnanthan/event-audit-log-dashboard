@@ -11,6 +11,7 @@ function Login() {
   const { login } = useContext(AuthContext);
   const [popup, setPopup] = useState(null);
   const navigate = useNavigate();
+  const hasGoogleClient = Boolean(String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim());
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -123,16 +124,20 @@ function Login() {
             <button type="submit" className="auth-submit-btn">Login</button>
           </form>
 
-          <div className="auth-divider">
-            <span>Or continue with</span>
-          </div>
+          {hasGoogleClient ? (
+            <>
+              <div className="auth-divider">
+                <span>Or continue with</span>
+              </div>
 
-          <div style={{ marginTop: "1rem", display: "flex", justifyContent: "center" }}>
-            <GoogleLogin
-              onSuccess={handleGoogleSuccess}
-              onError={() => console.log("Login Failed")}
-            />
-          </div>
+              <div style={{ marginTop: "1rem", display: "flex", justifyContent: "center" }}>
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => console.log("Login Failed")}
+                />
+              </div>
+            </>
+          ) : null}
 
           <p className="auth-footnote">
             Don't have an account? <Link to="/register" className="auth-inline-link">Register here</Link>

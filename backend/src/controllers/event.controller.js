@@ -1,4 +1,5 @@
 import Event from '../models/event.model.js';
+import ImportedEvent from '../models/importedEvent.model.js';
 import Alert from '../models/alert.model.js';
 import User from '../models/user.model.js';
 import ApiLog from '../models/apiLog.model.js';
@@ -132,21 +133,52 @@ const checkAlertThresholds = async (ip, email) => {
 };
 
 const checkGeoAnomaly = async (email, currentGeo, ip) => {
+  const isLocalIp = (value = "") => {
+    const normalized = String(value || "").replace("::ffff:", "").trim();
+    return (
+      !normalized ||
+      normalized === "127.0.0.1" ||
+      normalized === "::1" ||
+      normalized.startsWith("192.168.") ||
+      normalized.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)
+    );
+  };
+
   // Fetch the last event for this user (skipping the one we just saved)
   const lastEvent = await Event.findOne({ 
       'metadata.email': email,
-      'geoLocation.country': { $exists: true }
+      eventType: { $in: ["LOGIN_SUCCESS", "ADMIN_LOGIN_SUCCESS", "GOOGLE_LOGIN_SUCCESS", "ADMIN_GOOGLE_LOGIN_SUCCESS"] },
+      ipAddress: { $exists: true, $ne: "" },
   }).sort({ createdAt: -1 }).skip(1);
 
-  if (lastEvent && lastEvent.geoLocation && lastEvent.geoLocation.country !== currentGeo.country) {
+  const currentCountry = String(currentGeo?.country || "").toUpperCase();
+  const previousCountry = String(lastEvent?.geoLocation?.country || "").toUpperCase();
+  const currentIp = String(ip || "");
+  const previousIp = String(lastEvent?.ipAddress || "");
+  const hasCountryJump =
+    currentCountry &&
+    previousCountry &&
+    currentCountry !== previousCountry;
+  const hasPublicIpJump =
+    currentIp &&
+    previousIp &&
+    currentIp !== previousIp &&
+    !isLocalIp(currentIp) &&
+    !isLocalIp(previousIp);
+
+  if (lastEvent && (hasCountryJump || hasPublicIpJump)) {
       const timeDiff = (new Date() - new Date(lastEvent.createdAt)) / 1000 / 60; // minutes
       if (timeDiff < 5) {
+          const jumpText = hasCountryJump
+            ? `from ${currentCountry} within ${Math.round(timeDiff)} mins of login from ${previousCountry}`
+            : `between IPs ${previousIp} and ${currentIp} within ${Math.round(timeDiff)} mins`;
           await triggerAlert({
               type: "GEO_ANOMALY",
               severity: "MEDIUM",
               email,
               ipAddress: ip,
-              message: `Impossible travel: Login from ${currentGeo.country} within ${Math.round(timeDiff)} mins of login from ${lastEvent.geoLocation.country}`
+              message: `Impossible travel pattern detected: Login ${jumpText}.`
           });
           await updateRiskScore(email, 20);
       }
@@ -189,12 +221,16 @@ export const getAllEvents = async (req, res) => {
           startDate,
           endDate,
           scope = "ALL",
+          importSessionId,
         } = req.query;
+        const isImportQuery = Boolean(importSessionId);
+        const EventModel = isImportQuery ? ImportedEvent : Event;
         const query = {};
         const andConditions = [];
 
         if (eventType) query.eventType = { $regex: eventType, $options: 'i' };
         if (ipAddress) query.ipAddress = ipAddress;
+        if (importSessionId) query["metadata.importSessionId"] = String(importSessionId);
         if (startDate) query.createdAt = { ...query.createdAt, $gte: new Date(startDate) };
         if (endDate) {
             const end = new Date(endDate);
@@ -216,7 +252,7 @@ export const getAllEvents = async (req, res) => {
         const pageNumber = Math.max(1, Number(page) || 1);
         const pageSize = Math.max(1, Number(limit) || 25);
 
-        const events = await Event.find(query)
+        const events = await EventModel.find(query)
             .populate("userId", "name email")
             .sort({ createdAt: -1 })
             .limit(pageSize)
@@ -233,7 +269,7 @@ export const getAllEvents = async (req, res) => {
           };
         });
 
-        const count = await Event.countDocuments(query);
+        const count = await EventModel.countDocuments(query);
 
         res.json({
             events: normalizedEvents,
@@ -243,6 +279,169 @@ export const getAllEvents = async (req, res) => {
     } catch (error) {
         res.status(500).json({ message: 'Error fetching events' });
     }
+};
+
+const deriveEventStatus = (eventType = "", level = "") => {
+  const type = String(eventType || "").toUpperCase();
+  const lvl = String(level || "").toUpperCase();
+  if (type.includes("FAILED") || type.includes("ERROR") || type.includes("CRITICAL")) return "FAILED";
+  if (lvl === "HIGH" || lvl === "CRITICAL" || lvl === "ERROR") return "FAILED";
+  return "SUCCESS";
+};
+
+export const getImportedSessionProfile = async (req, res) => {
+  try {
+    const { importSessionId, startDate, endDate } = req.query;
+    if (!importSessionId) {
+      return res.status(400).json({ message: "importSessionId is required" });
+    }
+
+    const query = { "metadata.importSessionId": String(importSessionId) };
+    if (startDate) query.createdAt = { ...query.createdAt, $gte: new Date(startDate) };
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setUTCHours(23, 59, 59, 999);
+      query.createdAt = { ...query.createdAt, $lte: end };
+    }
+
+    const docs = await ImportedEvent.find(query).select("eventType metadata").lean();
+    const totalEvents = docs.length;
+
+    const fieldMap = new Map();
+    const topMap = new Map();
+    const eventTypeMap = new Map();
+    const statusMap = new Map();
+    const ignoredKeys = new Set([
+      "browser",
+      "rawLine",
+      "message",
+      "imported",
+      "importTag",
+      "importSessionId",
+      "uploadedFileName",
+      "sourceFile",
+      "sourceSystem",
+    ]);
+
+    docs.forEach((doc) => {
+      const type = String(doc?.eventType || "UNKNOWN_EVENT").toUpperCase();
+      eventTypeMap.set(type, (eventTypeMap.get(type) || 0) + 1);
+
+      const level = String(doc?.metadata?.level || "");
+      const status = deriveEventStatus(type, level);
+      statusMap.set(status, (statusMap.get(status) || 0) + 1);
+
+      const metadata = doc?.metadata && typeof doc.metadata === "object" ? doc.metadata : {};
+      Object.entries(metadata).forEach(([key, value]) => {
+        if (!key || ignoredKeys.has(key)) return;
+        if (value === null || value === undefined || value === "") return;
+
+        const keyEntry = fieldMap.get(key) || { key, count: 0, values: new Map() };
+        keyEntry.count += 1;
+        const safeValue = String(value);
+        keyEntry.values.set(safeValue, (keyEntry.values.get(safeValue) || 0) + 1);
+        fieldMap.set(key, keyEntry);
+      });
+    });
+
+    const fieldCoverage = Array.from(fieldMap.values())
+      .map((entry) => ({
+        field: entry.key,
+        count: entry.count,
+        coverage: totalEvents ? Number(((entry.count / totalEvents) * 100).toFixed(2)) : 0,
+        uniqueValues: entry.values.size,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    fieldMap.forEach((entry, key) => {
+      const topValues = Array.from(entry.values.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([value, count]) => ({ value, count }));
+      topMap.set(key, topValues);
+    });
+
+    topMap.set(
+      "eventType",
+      Array.from(eventTypeMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([value, count]) => ({ value, count }))
+    );
+    topMap.set(
+      "status",
+      Array.from(statusMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([value, count]) => ({ value, count }))
+    );
+
+    const eventTypeVariety = eventTypeMap.size;
+    const hasField = (name) => fieldMap.has(name) && (fieldMap.get(name)?.count || 0) > 0;
+
+    const chartRecommendations = [];
+    if (totalEvents === 0) {
+      chartRecommendations.push({
+        id: "empty",
+        chartType: "empty",
+        title: "No Data",
+        reason: "No imported events match this session/date filter.",
+      });
+    } else if (eventTypeVariety <= 2) {
+      if (hasField("processName")) {
+        chartRecommendations.push({
+          id: "top-process",
+          chartType: "bar",
+          field: "processName",
+          title: "Top Processes",
+          reason: "Event types are too limited; process distribution is more informative.",
+        });
+      }
+      if (hasField("host")) {
+        chartRecommendations.push({
+          id: "top-host",
+          chartType: "bar",
+          field: "host",
+          title: "Top Hosts",
+          reason: "Low event-type variety; host concentration reveals signal.",
+        });
+      }
+      chartRecommendations.push({
+        id: "status-split",
+        chartType: "donut",
+        field: "status",
+        title: "Status Split",
+        reason: "Success vs failed split provides clearer insight for small event mixes.",
+      });
+    } else {
+      chartRecommendations.push({
+        id: "event-type-distribution",
+        chartType: "pie",
+        field: "eventType",
+        title: "Event Type Distribution",
+        reason: "Event-type variety is sufficient for distribution analysis.",
+      });
+      chartRecommendations.push({
+        id: "status-split",
+        chartType: "donut",
+        field: "status",
+        title: "Status Split",
+        reason: "Status trend remains useful alongside event types.",
+      });
+    }
+
+    return res.json({
+      summary: {
+        importSessionId: String(importSessionId),
+        totalEvents,
+        eventTypeVariety,
+      },
+      fieldCoverage,
+      topValuesByField: Object.fromEntries(topMap.entries()),
+      chartRecommendations,
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Error building imported session profile" });
+  }
 };
 
 export const getEventVolume = async (req, res) => {

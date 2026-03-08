@@ -22,6 +22,8 @@ const toTitle = (value = "") =>
 
 function Dashboard() {
   const { user, token, logout } = useContext(AuthContext);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 900);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [stats, setStats] = useState({
@@ -33,6 +35,12 @@ function Dashboard() {
   const [activities, setActivities] = useState([]);
   const [securityInsights, setSecurityInsights] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -107,6 +115,7 @@ function Dashboard() {
             securityInsights={securityInsights}
             profileOpen={profileOpen}
             setProfileOpen={setProfileOpen}
+            isMobile={isMobile}
           />
         );
     }
@@ -114,15 +123,29 @@ function Dashboard() {
 
   return (
     <div style={styles.container}>
-      <aside style={styles.sidebar}>
+      {isMobile && (
+        <div style={styles.mobileTopbar}>
+          <button type="button" style={styles.mobileMenuBtn} onClick={() => setSidebarOpen((prev) => !prev)}>
+            {"\u2630"}
+          </button>
+          <div style={styles.mobileTopbarTitle}>UserDash</div>
+        </div>
+      )}
+      <aside
+        style={{
+          ...styles.sidebar,
+          ...(isMobile ? styles.sidebarMobile : {}),
+          ...(isMobile && !sidebarOpen ? styles.sidebarMobileHidden : {}),
+        }}
+      >
         <div style={styles.sidebarHeader}>UserDash</div>
         <nav style={styles.nav}>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            <NavItem label="Dashboard" id="dashboard" activeTab={activeTab} setActiveTab={setActiveTab} />
-            <NavItem label="Profile" id="profile" activeTab={activeTab} setActiveTab={setActiveTab} />
-            <NavItem label="Security Center" id="security-center" activeTab={activeTab} setActiveTab={setActiveTab} />
-            <NavItem label="Security Logs" id="logs" activeTab={activeTab} setActiveTab={setActiveTab} />
-            <NavItem label="Settings" id="settings" activeTab={activeTab} setActiveTab={setActiveTab} />
+            <NavItem label="Dashboard" id="dashboard" activeTab={activeTab} setActiveTab={(id) => { setActiveTab(id); if (isMobile) setSidebarOpen(false); }} />
+            <NavItem label="Profile" id="profile" activeTab={activeTab} setActiveTab={(id) => { setActiveTab(id); if (isMobile) setSidebarOpen(false); }} />
+            <NavItem label="Security Center" id="security-center" activeTab={activeTab} setActiveTab={(id) => { setActiveTab(id); if (isMobile) setSidebarOpen(false); }} />
+            <NavItem label="Security Logs" id="logs" activeTab={activeTab} setActiveTab={(id) => { setActiveTab(id); if (isMobile) setSidebarOpen(false); }} />
+            <NavItem label="Settings" id="settings" activeTab={activeTab} setActiveTab={(id) => { setActiveTab(id); if (isMobile) setSidebarOpen(false); }} />
           </ul>
         </nav>
         <div style={{ padding: "20px" }}>
@@ -131,7 +154,8 @@ function Dashboard() {
           </button>
         </div>
       </aside>
-      <main style={styles.main}>{renderContent()}</main>
+      {isMobile && sidebarOpen && <div style={styles.sidebarBackdrop} onClick={() => setSidebarOpen(false)} />}
+      <main style={{ ...styles.main, ...(isMobile ? styles.mainMobile : {}) }}>{renderContent()}</main>
     </div>
   );
 }
@@ -148,7 +172,7 @@ function NavItem({ label, id, activeTab, setActiveTab }) {
   );
 }
 
-function DashboardOverview({ user, stats, activities, securityInsights, profileOpen, setProfileOpen }) {
+function DashboardOverview({ user, stats, activities, securityInsights, profileOpen, setProfileOpen, isMobile }) {
   const riskScoreValue = Number(securityInsights?.riskScore?.score);
   const securityScoreDisplay = Number.isFinite(riskScoreValue) ? `${riskScoreValue}%` : stats.securityScore;
 
@@ -188,7 +212,7 @@ function DashboardOverview({ user, stats, activities, securityInsights, profileO
         </div>
       </header>
 
-      <div style={styles.cardGrid}>
+      <div style={{ ...styles.cardGrid, ...(isMobile ? styles.cardGridMobile : {}) }}>
         <StatCard title="Total Logins" value={stats.totalLogins} color="#3b82f6" />
         <StatCard title="Failed Attempts" value={stats.failedAttempts} color="#ef4444" />
         <StatCard title="Last Successful Login" value={stats.lastLogin} color="#10b981" fontSize="1rem" />
@@ -202,7 +226,7 @@ function DashboardOverview({ user, stats, activities, securityInsights, profileO
         ) : (
           <div style={styles.userChartList}>
             {chartRows.map((item) => (
-              <div key={item.eventType} style={styles.userChartRow}>
+              <div key={item.eventType} style={{ ...styles.userChartRow, ...(isMobile ? styles.userChartRowMobile : {}) }}>
                 <div style={styles.userChartLabel}>{toTitle(item.eventType)}</div>
                 <div style={styles.userChartTrack}>
                   <div style={{ ...styles.userChartFill, width: item.width }} />
@@ -545,6 +569,52 @@ const styles = {
     zIndex: 10,
     borderRight: "1px solid #ebeef5",
   },
+  sidebarMobile: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    height: "100vh",
+    width: "min(280px, 82vw)",
+    transition: "transform 0.22s ease",
+  },
+  sidebarMobileHidden: {
+    transform: "translateX(-105%)",
+  },
+  sidebarBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.35)",
+    zIndex: 8,
+  },
+  mobileTopbar: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "56px",
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "0 12px",
+    background: "#ffffff",
+    borderBottom: "1px solid #ebeef5",
+    zIndex: 9,
+  },
+  mobileMenuBtn: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "10px",
+    border: "1px solid #d7def0",
+    background: "#f6f8ff",
+    color: "#374151",
+    fontSize: "1.1rem",
+    cursor: "pointer",
+  },
+  mobileTopbarTitle: {
+    fontSize: "1.2rem",
+    fontWeight: "700",
+    color: "#1f2434",
+  },
   sidebarHeader: {
     padding: "24px",
     fontSize: "1.5rem",
@@ -583,6 +653,10 @@ const styles = {
     boxShadow: "none",
   },
   main: { flex: 1, padding: "26px 30px", overflowY: "auto" },
+  mainMobile: {
+    width: "100%",
+    padding: "72px 12px 16px",
+  },
   header: {
     display: "flex",
     justifyContent: "space-between",
@@ -632,6 +706,7 @@ const styles = {
     fontSize: "1rem",
   },
   cardGrid: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "24px", marginBottom: "24px" },
+  cardGridMobile: { gridTemplateColumns: "1fr", gap: "12px", marginBottom: "14px" },
   card: {
     backgroundColor: "white",
     padding: "24px",
@@ -753,6 +828,7 @@ const styles = {
   },
   userChartList: { display: "grid", gap: "14px" },
   userChartRow: { display: "grid", gridTemplateColumns: "220px 1fr 52px", gap: "14px", alignItems: "center" },
+  userChartRowMobile: { gridTemplateColumns: "1fr", gap: "8px" },
   userChartLabel: { color: "#334155", fontSize: "0.95rem", fontWeight: 600 },
   userChartTrack: { height: "12px", borderRadius: "999px", background: "#edf1fb", overflow: "hidden" },
   userChartFill: {

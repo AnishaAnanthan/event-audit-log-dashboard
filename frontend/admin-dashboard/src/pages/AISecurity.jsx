@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from "react";
+﻿import { useContext, useEffect, useMemo, useState } from "react";
 import { Bar, Doughnut, Line } from "react-chartjs-2";
 import {
   ArcElement,
@@ -25,7 +25,7 @@ ChartJS.register(
   Legend
 );
 
-function AISecurity() {
+function AISecurity({ mode = "page", activeFeature = "all" }) {
   const { API, token } = useContext(AuthContext);
 
   const [insightQuery, setInsightQuery] = useState("Show risk spikes this week.");
@@ -159,9 +159,11 @@ function AISecurity() {
     }
   };
 
+  const showFeature = (featureKey) => activeFeature === "all" || activeFeature === featureKey;
+
   return (
-    <div className="ai-security-grid ai-page ai-cards-grid">
-      <div className="ai-card-slot">
+    <div className={`ai-security-grid ai-page ${mode === "page" ? "ai-cards-grid" : "ai-widget-grid"}`}>
+      {showFeature("insight") && <div className="ai-card-slot">
       <SectionCard title="AI Insight Cards">
         <form onSubmit={handleGenerateInsights} className="ai-form-grid">
           <textarea
@@ -226,14 +228,20 @@ function AISecurity() {
           </div>
         )}
       </SectionCard>
-      </div>
+      </div>}
 
-      <div className="ai-card-slot">
+      {showFeature("summary") && <div className="ai-card-slot">
       <SectionCard
         title="AI Threat Summary"
         right={
-          <button className="btn-secondary" onClick={fetchThreatSummary} disabled={summaryLoading}>
-            {summaryLoading ? "Refreshing..." : "Refresh"}
+          <button
+            className="ai-assistant-icon-btn"
+            onClick={fetchThreatSummary}
+            disabled={summaryLoading}
+            title="Refresh"
+            aria-label="Refresh"
+          >
+            {summaryLoading ? "..." : "↻"}
           </button>
         }
       >
@@ -264,9 +272,9 @@ function AISecurity() {
           </div>
         )}
       </SectionCard>
-      </div>
+      </div>}
 
-      <div className="ai-card-slot">
+      {showFeature("query") && <div className="ai-card-slot">
       <SectionCard title="AI Log Query Assistant">
         <form onSubmit={handleQuery} className="ai-form-grid">
           <textarea
@@ -307,9 +315,9 @@ function AISecurity() {
           </div>
         )}
       </SectionCard>
-      </div>
+      </div>}
 
-      <div className="ai-card-slot">
+      {showFeature("triage") && <div className="ai-card-slot">
       <SectionCard title="AI Alert Triage">
         <form onSubmit={handleTriage} className="ai-form-grid">
           <select
@@ -327,7 +335,7 @@ function AISecurity() {
               ))
             )}
           </select>
-          <input type="text" value={alertId} readOnly className="form-input" />
+          <input type="text" value={alertId} readOnly className="form-input ai-triage-id" />
           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "var(--text-primary)" }}>
             <input
               type="checkbox"
@@ -362,7 +370,7 @@ function AISecurity() {
           </div>
         )}
       </SectionCard>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -381,18 +389,20 @@ function InsightChartRenderer({ type, chartData }) {
       {
         label: dataset?.label || "Value",
         data: values,
-        borderColor: "#2563eb",
+        borderColor: "#60a5fa",
         backgroundColor: type === "doughnut" ? [
-          "#2563eb",
-          "#10b981",
-          "#f59e0b",
-          "#ef4444",
-          "#7c3aed",
-          "#0ea5e9",
-          "#64748b",
-        ] : "rgba(37, 99, 235, 0.2)",
+          "#5b8fd4",
+          "#2f9d7a",
+          "#c99a2a",
+          "#d26767",
+          "#7f6bcf",
+          "#4f8db8",
+          "#5f7ea8",
+        ] : "rgba(96, 165, 250, 0.30)",
         fill: type === "line",
         tension: 0.3,
+        pointRadius: 3,
+        pointBackgroundColor: "#93c5fd",
       },
     ],
   };
@@ -400,7 +410,11 @@ function InsightChartRenderer({ type, chartData }) {
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { display: true, position: "bottom" } },
+    plugins: { legend: { display: true, position: "bottom", labels: { color: "#dce8ff" } } },
+    scales: {
+      x: { ticks: { color: "#b7c9e9" }, grid: { color: "rgba(139, 169, 214, 0.2)" } },
+      y: { ticks: { color: "#b7c9e9" }, grid: { color: "rgba(139, 169, 214, 0.2)" } },
+    },
   };
 
   return (
@@ -492,4 +506,6 @@ function ToolUsage({ tools = [] }) {
 }
 
 export default AISecurity;
+
+
 

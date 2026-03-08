@@ -627,16 +627,78 @@ export const triageAlertWithAi = async ({ authHeader, user, alertId, approveReso
     throw err;
   }
 
+  const auditLogContext = await callMcpTool({
+    authHeader,
+    toolName: "get_audit_logs",
+    args: {
+      timeframe: "24h",
+      limit: 60,
+      ...(alert?.ipAddress ? { ipAddress: alert.ipAddress } : {}),
+    },
+  });
+
+  const auditRecords = Array.isArray(auditLogContext?.data?.records)
+    ? auditLogContext.data.records
+    : [];
+  const compactAuditRecords = auditRecords.slice(0, 20).map((event) => ({
+    id: event?._id,
+    eventType: event?.eventType,
+    ipAddress: event?.ipAddress || "",
+    email: event?.metadata?.email || "",
+    createdAt: event?.createdAt,
+  }));
+
   const prompt = [
     "You are a security triage assistant.",
     "Return strict JSON only with keys: severity_classification, explanation, recommended_action, should_resolve.",
     "severity_classification must be LOW|MEDIUM|HIGH|CRITICAL.",
     "should_resolve must be true/false.",
     `Alert payload: ${JSON.stringify(alert)}`,
+    `Recent related audit logs (24h): ${JSON.stringify(compactAuditRecords)}`,
   ].join("\n");
 
   const ai = await callProviderText({ prompt });
   const parsed = tryParseJson(ai.text) || {};
+
+  const relatedCount = compactAuditRecords.length;
+  const failedRelatedCount = compactAuditRecords.filter((row) =>
+    String(row?.eventType || "").toUpperCase().includes("FAILED")
+  ).length;
+  const dynamicExplanation = [
+    `${String(alert?.type || "ALERT").replaceAll("_", " ")} observed for ${alert?.email || alert?.ipAddress || "target"}.`,
+    `Severity ${String(alert?.severity || "MEDIUM")} with occurrence count ${Number(alert?.occurrenceCount || 1)}.`,
+    `Related audit logs in last 24h: ${relatedCount}${relatedCount ? `, failed entries: ${failedRelatedCount}` : ""}.`,
+  ].join(" ");
+
+  const dynamicAction = (() => {
+    const type = String(alert?.type || "").toUpperCase();
+    if (type.includes("IP_BRUTE_FORCE")) {
+      return "Temporarily block the source IP, enforce rate-limits, and review accounts targeted by repeated failures.";
+    }
+    if (type.includes("FAILED_LOGIN_THRESHOLD")) {
+      return "Enable step-up authentication for the account and verify whether failures are user error or credential stuffing.";
+    }
+    if (type.includes("GEO_ANOMALY")) {
+      return "Validate user travel context, revoke suspicious sessions, and require re-authentication from trusted locations.";
+    }
+    if (type.includes("NEW_DEVICE_LOGIN")) {
+      return "Confirm device ownership with the user and monitor subsequent actions from this device for escalation signals.";
+    }
+    return "Correlate with recent logs, validate affected identity/IP, and resolve only after evidence confirms benign behavior.";
+  })();
+
+  const isGenericText = (value = "") => {
+    const text = String(value || "").trim().toLowerCase();
+    if (!text) return true;
+    const genericPatterns = [
+      "triage completed from current alert context",
+      "investigate related logs and affected account/ip before resolving",
+      "review and investigate",
+      "check the logs",
+      "monitor the alert",
+    ];
+    return genericPatterns.some((pattern) => text.includes(pattern)) || text.length < 40;
+  };
 
   const triage = {
     severity_classification: ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(parsed.severity_classification)
@@ -645,13 +707,20 @@ export const triageAlertWithAi = async ({ authHeader, user, alertId, approveReso
     explanation:
       typeof parsed.explanation === "string" && parsed.explanation.trim()
         ? parsed.explanation.trim()
-        : "Triage completed from current alert context.",
+        : dynamicExplanation,
     recommended_action:
       typeof parsed.recommended_action === "string" && parsed.recommended_action.trim()
         ? parsed.recommended_action.trim()
-        : "Investigate related logs and affected account/IP before resolving.",
+        : dynamicAction,
     should_resolve: Boolean(parsed.should_resolve),
   };
+
+  if (isGenericText(triage.explanation)) {
+    triage.explanation = dynamicExplanation;
+  }
+  if (isGenericText(triage.recommended_action)) {
+    triage.recommended_action = dynamicAction;
+  }
 
   let resolution = null;
   if (approveResolution === true) {
@@ -685,6 +754,14 @@ export const triageAlertWithAi = async ({ authHeader, user, alertId, approveReso
     resolved: resolution?.data?.alert || null,
     toolsUsed: [
       { toolName: "get_alerts", args: { alertId, limit: 1 } },
+      {
+        toolName: "get_audit_logs",
+        args: {
+          timeframe: "24h",
+          limit: 60,
+          ...(alert?.ipAddress ? { ipAddress: alert.ipAddress } : {}),
+        },
+      },
       ...(resolution ? [{ toolName: "resolve_alert", args: { alertId } }] : []),
     ],
     model: ai.model,

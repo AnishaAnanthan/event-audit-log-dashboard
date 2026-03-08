@@ -1,52 +1,50 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useMemo } from 'react';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { AuthContext } from '../../context/AuthContext';
+import { buildAlertSeverityData } from '../../utils/dashboardFilters';
+import LoadingSpinner from '../ui/LoadingSpinner';
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
-function AlertSeverityDonut() {
+function AlertSeverityDonut({ alertsOverride = null, summaryOverride = null, onFilterSelect }) {
   const { API, token } = useContext(AuthContext);
   const [chartData, setChartData] = useState(null);
-  const [totalAlerts, setTotalAlerts] = useState(0);
+  const overrideComputed = useMemo(() => {
+    if (summaryOverride?.chartData) return summaryOverride;
+    return Array.isArray(alertsOverride) ? buildAlertSeverityData(alertsOverride) : null;
+  }, [alertsOverride, summaryOverride]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
+        if (overrideComputed) return;
+
         const { data } = await API.get('/api/alerts', {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        const counts = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
-        data.forEach(alert => {
-          if (counts[alert.severity] !== undefined) {
-            counts[alert.severity]++;
-          }
-        });
-
-        setTotalAlerts(data.length);
-        setChartData({
-          labels: ['Low', 'Medium', 'High', 'Critical'],
-          datasets: [
-            {
-              data: [counts.LOW, counts.MEDIUM, counts.HIGH, counts.CRITICAL],
-              backgroundColor: [
-                '#3b82f6', // Low - Blue
-                '#f59e0b', // Medium - Amber
-                '#f97316', // High - Orange
-                '#ef4444', // Critical - Red
-              ],
-              borderWidth: 0,
-              hoverOffset: 4
-            },
-          ],
-        });
+        const next = buildAlertSeverityData(Array.isArray(data) ? data : []);
+        setChartData(next.chartData);
       } catch (error) {
         console.error("Failed to fetch alert data", error);
       }
     };
     fetchData();
-  }, [API, token]);
+  }, [API, token, overrideComputed]);
+
+  const effectiveChartData = overrideComputed?.chartData || chartData;
+  const severityItems = useMemo(() => {
+    if (!effectiveChartData?.labels?.length) return [];
+    const labels = effectiveChartData.labels || [];
+    const values = effectiveChartData?.datasets?.[0]?.data || [];
+    const colors = effectiveChartData?.datasets?.[0]?.backgroundColor || [];
+    return labels.map((label, index) => ({
+      label,
+      value: Number(values[index] || 0),
+      color: colors[index] || "#94a3b8",
+    }));
+  }, [effectiveChartData]);
 
   const options = {
     responsive: true,
@@ -54,15 +52,7 @@ function AlertSeverityDonut() {
     cutout: '70%',
     plugins: {
       legend: {
-        position: 'bottom',
-        align: 'center',
-        labels: {
-          boxWidth: 10,
-          usePointStyle: true,
-          padding: 14,
-          color: '#64748b',
-          font: { size: 12, weight: '500' }
-        }
+        display: false,
       },
       tooltip: {
         backgroundColor: 'rgba(255, 255, 255, 0.95)',
@@ -73,6 +63,17 @@ function AlertSeverityDonut() {
         cornerRadius: 8,
       }
     },
+    onClick: (_event, elements) => {
+      if (!elements.length || !onFilterSelect || !effectiveChartData) return;
+      const index = elements[0].index;
+      const severityLabel = effectiveChartData.labels?.[index];
+      if (!severityLabel) return;
+      onFilterSelect({
+        source: 'alertSeverity',
+        severity: String(severityLabel).toUpperCase(),
+        label: `${severityLabel} severity`,
+      });
+    },
   };
 
   // Plugin to draw text in center
@@ -81,19 +82,21 @@ function AlertSeverityDonut() {
     beforeDraw: function(chart) {
       if (chart.config.type !== 'doughnut') return;
       const width = chart.width, height = chart.height, ctx = chart.ctx;
+      const values = chart?.data?.datasets?.[0]?.data || [];
+      const liveTotal = values.reduce((sum, value) => sum + Number(value || 0), 0);
       ctx.restore();
       const valueFontSize = Math.max(28, Math.min(44, Math.round(height * 0.13)));
       const labelFontSize = Math.max(11, Math.min(14, Math.round(height * 0.04)));
       ctx.font = `700 ${valueFontSize}px Inter, sans-serif`;
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "#0f172a";
-      const text = totalAlerts.toString();
+      ctx.fillStyle = "#f8fafc";
+      const text = String(liveTotal);
       const textX = Math.round((width - ctx.measureText(text).width) / 2);
       const textY = Math.round(height / 2) - 10;
       ctx.fillText(text, textX, textY);
       
       ctx.font = `500 ${labelFontSize}px Inter, sans-serif`;
-      ctx.fillStyle = "#64748b";
+      ctx.fillStyle = "#9db2da";
       const label = "Total Alerts";
       const labelX = Math.round((width - ctx.measureText(label).width) / 2);
       const labelY = textY + 28;
@@ -104,7 +107,39 @@ function AlertSeverityDonut() {
 
   return (
     <div className="alert-donut-wrap">
-      {chartData ? <Doughnut data={chartData} options={options} plugins={[centerTextPlugin]} /> : <div>Loading...</div>}
+      {effectiveChartData ? (
+        <div className="alert-donut-layout">
+          <div className="alert-donut-canvas">
+            <Doughnut data={effectiveChartData} options={options} plugins={[centerTextPlugin]} />
+          </div>
+          <div className="alert-donut-side-legend">
+            <div className="alert-donut-legend-head">
+              <span>Category</span>
+              <span>Count</span>
+            </div>
+            {severityItems.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="alert-donut-legend-row"
+                onClick={() =>
+                  onFilterSelect?.({
+                    source: "alertSeverity",
+                    severity: String(item.label).toUpperCase(),
+                    label: `${item.label} severity`,
+                  })
+                }
+              >
+                <span className="alert-donut-legend-dot" style={{ backgroundColor: item.color }} />
+                <span className="alert-donut-legend-label">{item.label}</span>
+                <span className="alert-donut-legend-value">{item.value}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <LoadingSpinner label="Loading alerts chart" />
+      )}
     </div>
   );
 }

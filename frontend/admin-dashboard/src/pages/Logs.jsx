@@ -1,10 +1,43 @@
-import { useEffect, useState, useContext } from "react";
+import { useEffect, useMemo, useState, useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
 import SectionCard from "../components/ui/SectionCard";
+import LoadingSpinner from "../components/ui/LoadingSpinner";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Doughnut } from "react-chartjs-2";
+import { ArcElement, Chart as ChartJS, Legend, Tooltip } from "chart.js";
+
+ChartJS.register(ArcElement, Tooltip, Legend);
+
+const DONUT_DEFS = [
+  { key: "adminLogin", label: "Admin Login", matcher: (type) => type.includes("ADMIN_LOGIN") },
+  { key: "userLogin", label: "User Login", matcher: (type) => type.includes("LOGIN_") && !type.includes("ADMIN_LOGIN") },
+  { key: "registration", label: "Registration", matcher: (type) => type.includes("REGISTER") },
+  {
+    key: "logoutDelete",
+    label: "Logout/Delete",
+    matcher: (type) => type.includes("LOGOUT") || type.includes("ACCOUNT_DELETED") || type.includes("DELETE"),
+  },
+  {
+    key: "others",
+    label: "Other Events",
+    matcher: (type) =>
+      !(
+        type.includes("ADMIN_LOGIN") ||
+        (type.includes("LOGIN_") && !type.includes("ADMIN_LOGIN")) ||
+        type.includes("REGISTER") ||
+        type.includes("LOGOUT") ||
+        type.includes("ACCOUNT_DELETED") ||
+        type.includes("DELETE")
+      ),
+  },
+];
 
 function Logs() {
-  const { API, token } = useContext(AuthContext);
+  const { API, token, logout } = useContext(AuthContext);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [logs, setLogs] = useState([]);
+  const [summaryLogs, setSummaryLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -12,11 +45,17 @@ function Logs() {
     eventType: "",
     ipAddress: "",
     startDate: "",
-    endDate: ""
+    endDate: "",
   });
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [roleScope, setRoleScope] = useState("ALL");
+  const [selectedUser, setSelectedUser] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const importSessionId = useMemo(
+    () => new URLSearchParams(location.search).get("importSessionId") || "",
+    [location.search]
+  );
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -26,13 +65,14 @@ function Logs() {
         page,
         limit: 25,
         scope: roleScope,
-        ...filters
+        ...(importSessionId ? { importSessionId } : {}),
+        ...filters,
       }).toString();
-      
+
       const { data } = await API.get(`/api/events/admin/all?${query}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       });
-      
+
       setLogs(Array.isArray(data.events) ? data.events : []);
       setTotalPages(Number(data.totalPages) || 1);
     } catch (error) {
@@ -44,9 +84,46 @@ function Logs() {
     }
   };
 
+  const fetchSummaryLogs = async () => {
+    try {
+      const pageSize = 500;
+      let nextPage = 1;
+      let nextTotalPages = 1;
+      const merged = [];
+
+      while (nextPage <= nextTotalPages) {
+        const query = new URLSearchParams({
+          page: nextPage,
+          limit: pageSize,
+          scope: roleScope,
+          ...(importSessionId ? { importSessionId } : {}),
+          ...filters,
+        }).toString();
+
+        const { data } = await API.get(`/api/events/admin/all?${query}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const chunk = Array.isArray(data?.events) ? data.events : [];
+        merged.push(...chunk);
+        nextTotalPages = Math.max(1, Number(data?.totalPages) || 1);
+        nextPage += 1;
+      }
+
+      setSummaryLogs(merged);
+    } catch (error) {
+      console.error("Failed to fetch summary logs", error);
+      setSummaryLogs([]);
+    }
+  };
+
   useEffect(() => {
     fetchLogs();
-  }, [page, filters, roleScope]); // Re-fetch when page, filters, or scope changes
+  }, [page, filters, roleScope, importSessionId]);
+
+  useEffect(() => {
+    fetchSummaryLogs();
+  }, [filters, roleScope, importSessionId]);
 
   const handleFilterChange = (e) => {
     setFilters({ ...filters, [e.target.name]: e.target.value });
@@ -54,7 +131,7 @@ function Logs() {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    setPage(1); // Reset to page 1 on new search
+    setPage(1);
   };
 
   const getCsvFilename = (fallback, disposition) => {
@@ -66,9 +143,7 @@ function Logs() {
   const handleExportCsv = async () => {
     setExporting(true);
     try {
-      const query = new URLSearchParams(
-        Object.entries(filters).filter(([, value]) => value !== "")
-      ).toString();
+      const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== "")).toString();
 
       const { data, headers } = await API.get(`/api/export/events?${query}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -91,127 +166,374 @@ function Logs() {
     }
   };
 
+  const normalizedLogs = useMemo(
+    () =>
+      logs.map((log) => {
+        const eventType = String(log.eventType || "UNKNOWN_EVENT").toUpperCase();
+        const user = log.userName || log.userId?.name || log.userId || "System";
+        const failed = eventType.includes("FAILED");
+        return {
+          ...log,
+          _eventType: eventType,
+          _user: String(user),
+          _status: failed ? "Failed" : "Success",
+        };
+      }),
+    [logs]
+  );
+
+  const normalizedSummaryLogs = useMemo(
+    () =>
+      summaryLogs.map((log) => {
+        const eventType = String(log.eventType || "UNKNOWN_EVENT").toUpperCase();
+        const user = log.userName || log.userId?.name || log.userId || "System";
+        const failed = eventType.includes("FAILED");
+        return {
+          ...log,
+          _eventType: eventType,
+          _user: String(user),
+          _status: failed ? "Failed" : "Success",
+        };
+      }),
+    [summaryLogs]
+  );
+
+  const logsForDonutSummary = useMemo(
+    () => (normalizedSummaryLogs.length > 0 ? normalizedSummaryLogs : normalizedLogs),
+    [normalizedSummaryLogs, normalizedLogs]
+  );
+
+  const donutSummaries = useMemo(() => {
+    return DONUT_DEFS.map((def) => {
+      const subset = logsForDonutSummary.filter((log) => def.matcher(log._eventType));
+      const success = subset.filter((log) => log._status === "Success").length;
+      const failed = subset.filter((log) => log._status === "Failed").length;
+      return {
+        ...def,
+        total: success + failed,
+        success,
+        failed,
+      };
+    });
+  }, [logsForDonutSummary]);
+
+  const selectedUserDetails = useMemo(() => {
+    if (!selectedUser) return [];
+    return normalizedLogs.filter((log) => log._user === selectedUser).slice(0, 8);
+  }, [normalizedLogs, selectedUser]);
+
+  const handleExportSelectedCsv = () => {
+    if (!selectedUserDetails.length) return;
+    const header = ["event_type", "ip_address", "location", "date", "status"];
+    const rows = selectedUserDetails.map((item) => [
+      item._eventType,
+      item.ipAddress || "",
+      item.geoLocation?.country || item.country || "LOCAL",
+      new Date(item.createdAt).toISOString(),
+      item._status,
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `selected_user_${selectedUser || "logs"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
-    <SectionCard>
-      {/* Filters */}
-      <form onSubmit={handleSearch} className="logs-filter-row">
-        <div className="logs-filter-item">
-          <label className="form-label">Event Type</label>
-          <input type="text" name="eventType" placeholder="e.g. LOGIN_FAILED" value={filters.eventType} onChange={handleFilterChange} className="form-input compact-input" />
-        </div>
-        <div className="logs-filter-item">
-          <label className="form-label">IP Address</label>
-          <input type="text" name="ipAddress" placeholder="127.0.0.1" value={filters.ipAddress} onChange={handleFilterChange} className="form-input compact-input" />
-        </div>
-        <div className="logs-filter-item">
-          <label className="form-label">Start Date</label>
-          <input type="date" name="startDate" value={filters.startDate} onChange={handleFilterChange} className="form-input compact-input" />
-        </div>
-        <div className="logs-filter-item">
-          <label className="form-label">End Date</label>
-          <input type="date" name="endDate" value={filters.endDate} onChange={handleFilterChange} className="form-input compact-input" />
-        </div>
-        <div className="logs-filter-item logs-filter-action">
-          <button type="submit" className="btn-primary compact-btn">Filter Logs</button>
-        </div>
-        <div className="logs-filter-item logs-filter-action">
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            disabled={exporting}
-            className="btn-primary compact-btn"
-          >
-            {exporting ? "Exporting..." : "Export CSV"}
+    <SectionCard className="audit-logs-redesign">
+      <div className="audit-layout-grid">
+        <div className="dashboard-top-shell audit-top-shell">
+          <button type="button" className="dashboard-menu-icon fixed-top-left" aria-label="Menu" onClick={() => setMenuOpen(true)}>
+            {"\u2630"}
           </button>
         </div>
-      </form>
-      <div className="log-scope-toggle">
-        <button
-          type="button"
-          className={`btn-secondary ${roleScope === "ALL" ? "active" : ""}`}
-          onClick={() => setRoleScope("ALL")}
-        >
-          All Logs
-        </button>
-        <button
-          type="button"
-          className={`btn-secondary ${roleScope === "ADMIN" ? "active" : ""}`}
-          onClick={() => setRoleScope("ADMIN")}
-        >
-          Admin Logs
-        </button>
-        <button
-          type="button"
-          className={`btn-secondary ${roleScope === "USER" ? "active" : ""}`}
-          onClick={() => setRoleScope("USER")}
-        >
-          User Logs
-        </button>
-      </div>
 
-      {/* Table */}
-      {loading ? (
-        <div style={{ textAlign: "center", padding: "2rem" }}>Loading logs...</div>
-      ) : fetchError ? (
-        <div className="error-msg" style={{ marginBottom: 0 }}>{fetchError}</div>
-      ) : (
-        <>
-          <div className="table-container">
-            <table>
+        {menuOpen && (
+          <>
+            <div className="dashboard-menu-backdrop" onClick={() => { setMenuOpen(false); }} />
+            <aside className="dashboard-floating-menu">
+              <div className="dashboard-floating-menu-title">Menu</div>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/"); setMenuOpen(false); }}>
+                Dashboard
+              </button>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/logs"); setMenuOpen(false); }}>
+                Audit Logs
+              </button>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/alerts"); setMenuOpen(false); }}>
+                Alerts
+              </button>
+              <button
+                type="button"
+                className="dashboard-floating-menu-item"
+                onClick={() => { navigate("/log-import"); setMenuOpen(false); }}
+              >
+                Log Import
+              </button>
+              <button type="button" className="dashboard-floating-menu-item danger" onClick={logout}>
+                Logout
+              </button>
+            </aside>
+          </>
+        )}
+
+        <section className="audit-donut-summary">
+          <div className="audit-donut-row">
+            {donutSummaries.map((item) => (
+              <AuditDonut key={item.key} item={item} />
+            ))}
+            <div className="audit-donut-legend">
+              <div className="audit-donut-legend-item">
+                <span className="dot success" /> Success
+              </div>
+              <div className="audit-donut-legend-item">
+                <span className="dot failed" /> Failed
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <form onSubmit={handleSearch} className="audit-filter-row">
+          <input
+            type="text"
+            name="eventType"
+            placeholder="Event Type"
+            value={filters.eventType}
+            onChange={handleFilterChange}
+            className="form-input compact-input"
+          />
+          <input
+            type="text"
+            name="ipAddress"
+            placeholder="IP Address"
+            value={filters.ipAddress}
+            onChange={handleFilterChange}
+            className="form-input compact-input"
+          />
+          <input
+            type="date"
+            name="startDate"
+            value={filters.startDate}
+            onChange={handleFilterChange}
+            className="form-input compact-input"
+          />
+          <input
+            type="date"
+            name="endDate"
+            value={filters.endDate}
+            onChange={handleFilterChange}
+            className="form-input compact-input"
+          />
+          <button type="submit" className="btn-secondary compact-btn">
+            Filter Logs
+          </button>
+          <button type="button" onClick={handleExportCsv} disabled={exporting} className="btn-secondary compact-btn">
+            {exporting ? "Exporting..." : "Export CSV"}
+          </button>
+        </form>
+
+        <div className="audit-scope-tabs">
+          <button
+            type="button"
+            className={`btn-secondary ${roleScope === "ALL" ? "active" : ""}`}
+            onClick={() => setRoleScope("ALL")}
+          >
+            All Logs
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary ${roleScope === "ADMIN" ? "active" : ""}`}
+            onClick={() => setRoleScope("ADMIN")}
+          >
+            Admin Logs
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary ${roleScope === "USER" ? "active" : ""}`}
+            onClick={() => setRoleScope("USER")}
+          >
+            User Logs
+          </button>
+        </div>
+
+        {loading ? (
+          <LoadingSpinner label="Loading logs" className="audit-inline-loader" />
+        ) : fetchError ? (
+          <div className="error-msg" style={{ marginBottom: 0 }}>{fetchError}</div>
+        ) : (
+          <>
+            <div className="table-container audit-table-wrap">
+              <table className="audit-table">
+                <thead>
+                  <tr>
+                    <th>Event Type</th>
+                    <th>User</th>
+                    <th>IP Address</th>
+                    <th>Location</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizedLogs.length > 0 ? (
+                    normalizedLogs.map((log) => (
+                      <tr key={log._id}>
+                        <td>{log._eventType}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="audit-user-link"
+                            onClick={() => setSelectedUser(log._user)}
+                            title="Show user details flow"
+                          >
+                            {log._user}
+                          </button>
+                        </td>
+                        <td>
+                          <span className="audit-ip-pill">{log.ipAddress}</span>
+                        </td>
+                        <td>{log.geoLocation?.country || log.country || "LOCAL"}</td>
+                        <td>{new Date(log.createdAt).toLocaleString()}</td>
+                        <td>
+                          <span className={`audit-status ${log._status === "Failed" ? "failed" : "success"}`}>{log._status}</span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="6" className="audit-empty-row">No logs found for this selection.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="audit-pagination-row">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+                className="btn-secondary compact-btn"
+                style={{ opacity: page <= 1 ? 0.5 : 1 }}
+              >
+                Previous
+              </button>
+              <span className="audit-page-meta">Page {page} of {totalPages}</span>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage(page + 1)}
+                className="btn-secondary compact-btn"
+                style={{ opacity: page >= totalPages ? 0.5 : 1 }}
+              >
+                Next
+              </button>
+            </div>
+          </>
+        )}
+
+        <section className="audit-user-flow">
+          <div className="audit-flow-column">
+            <div className="audit-flow-line from-table curve" />
+            <div className="audit-center-node">
+              {selectedUser || "Selected user"}
+            </div>
+            <div className="audit-flow-line to-detail curve" />
+          </div>
+          <div className="audit-selected-actions">
+            <button type="button" className="btn-secondary compact-btn" onClick={handleExportSelectedCsv} disabled={!selectedUserDetails.length}>
+              Export Selected CSV
+            </button>
+          </div>
+          <div className="table-container audit-selected-table-wrap">
+            <table className="audit-table compact">
               <thead>
                 <tr>
                   <th>Event Type</th>
-                  <th>User</th>
                   <th>IP Address</th>
+                  <th>Location</th>
                   <th>Date</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {logs && logs.length > 0 ? (
-                  logs.map((log) => (
-                    <tr key={log._id} style={{ verticalAlign: "middle" }}>
-                      <td><span style={{ fontWeight: "500", color: "var(--text-primary)" }}>{log.eventType || "UNKNOWN_EVENT"}</span></td>
-                      <td>{log.userName || log.userId?.name || log.userId || "System"}</td>
-                      <td><span style={{ fontFamily: "monospace", background: "#f1f5f9", padding: "4px 8px", borderRadius: "6px", fontSize: "0.8125rem" }}>{log.ipAddress}</span></td>
-                      <td>{new Date(log.createdAt).toLocaleString()}</td>
+                {selectedUserDetails.length ? (
+                  selectedUserDetails.map((item) => (
+                    <tr key={`detail-${item._id}`}>
+                      <td>{item._eventType}</td>
+                      <td><span className="audit-ip-pill">{item.ipAddress}</span></td>
+                      <td>{item.geoLocation?.country || item.country || "LOCAL"}</td>
+                      <td>{new Date(item.createdAt).toLocaleString()}</td>
                       <td>
-                        {(() => {
-                          const isFailed = String(log.eventType || "").includes("FAILED");
-                          return (
-                        <span style={{
-                          padding: "4px 12px",
-                          borderRadius: "9999px",
-                          fontSize: "0.75rem",
-                          fontWeight: "600",
-                          backgroundColor: isFailed ? "rgba(239,68,68,0.12)" : "rgba(16,185,129,0.12)",
-                          color: isFailed ? "var(--danger-color)" : "var(--success-color)"
-                        }}>
-                          {isFailed ? "Failed" : "Success"}
-                        </span>
-                          );
-                        })()}
+                        <span className={`audit-status ${item._status === "Failed" ? "failed" : "success"}`}>{item._status}</span>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="5" style={{ padding: "3rem", textAlign: "center", color: "var(--text-secondary)" }}>No logs found for this selection.</td>
+                    <td colSpan="5" className="audit-empty-row">Click a username above to view details.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-
-          {/* Pagination */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1.5rem" }}>
-            <button disabled={page <= 1} onClick={() => setPage(page - 1)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', background: 'white', borderRadius: 'var(--radius-md)', cursor: 'pointer', opacity: page <= 1 ? 0.5 : 1 }}>Previous</button>
-            <span style={{ fontSize: "0.875rem", color: "var(--text-secondary)", fontWeight: "500" }}>Page {page} of {totalPages}</span>
-            <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} style={{ padding: '0.5rem 1rem', border: '1px solid var(--border-color)', background: 'white', borderRadius: 'var(--radius-md)', cursor: 'pointer', opacity: page >= totalPages ? 0.5 : 1 }}>Next</button>
-          </div>
-        </>
-      )}
+        </section>
+      </div>
     </SectionCard>
+  );
+}
+
+function AuditDonut({ item }) {
+  const centerTextPlugin = {
+    id: `auditDonutCenter-${item.key}`,
+    beforeDraw: (chart) => {
+      const { width, height, ctx } = chart;
+      const values = chart?.data?.datasets?.[0]?.data || [];
+      const liveTotal = values.reduce((sum, value) => sum + Number(value || 0), 0);
+      ctx.save();
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "700 18px Inter, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(liveTotal), width / 2, height / 2 - 3);
+      ctx.font = "500 10px Inter, sans-serif";
+      ctx.fillStyle = "#9db2da";
+      ctx.fillText("Total", width / 2, height / 2 + 13);
+      ctx.restore();
+    },
+  };
+
+  const data = {
+    labels: ["Success", "Failed"],
+    datasets: [
+      {
+        data: [item.success, item.failed],
+        backgroundColor: ["#22c55e", "#ef4444"],
+        borderWidth: 0,
+      },
+    ],
+  };
+
+  return (
+    <article className="audit-donut-item">
+      <div className="audit-donut-canvas">
+        <Doughnut
+          data={data}
+          plugins={[centerTextPlugin]}
+          options={{
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: "72%",
+            plugins: { legend: { display: false }, tooltip: { enabled: true } },
+          }}
+        />
+      </div>
+      <div className="audit-donut-label">{item.label}</div>
+    </article>
   );
 }
 

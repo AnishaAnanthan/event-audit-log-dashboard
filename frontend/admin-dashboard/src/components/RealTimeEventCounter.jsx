@@ -1,7 +1,8 @@
 import { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
+import { getEventCategory } from '../utils/dashboardFilters';
 
-function RealTimeEventCounter() {
+function RealTimeEventCounter({ eventsOverride = null, alertsOverride = null, onMetricFilter }) {
   const { API, token } = useContext(AuthContext);
   const [metrics, setMetrics] = useState({
     recentEvents: 0,
@@ -44,23 +45,84 @@ function RealTimeEventCounter() {
   };
 
   useEffect(() => {
+    if (Array.isArray(eventsOverride) && Array.isArray(alertsOverride)) {
+      const now = Date.now();
+      const fiveMinAgo = now - 5 * 60000;
+      const tenMinAgo = now - 10 * 60000;
+      const recentEvents = eventsOverride.filter((event) => new Date(event.createdAt).getTime() >= fiveMinAgo).length;
+      const failedLogins = eventsOverride.filter((event) => {
+        const ts = new Date(event.createdAt).getTime();
+        return ts >= tenMinAgo && getEventCategory(event.eventType) === 'LOGIN_FAILED';
+      }).length;
+
+      setMetrics({
+        recentEvents,
+        activeAlerts: alertsOverride.length,
+        failedLogins,
+      });
+      return;
+    }
+
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 15000); // Poll every 15s
     return () => clearInterval(interval);
-  }, [API, token]);
+  }, [API, token, eventsOverride, alertsOverride]);
 
   return (
     <>
-      <MetricItem label="Events (5m)" value={metrics.recentEvents} color="#3b82f6" />
-      <MetricItem label="Active Alerts" value={metrics.activeAlerts} color="#f59e0b" />
-      <MetricItem label="Failed Logins (10m)" value={metrics.failedLogins} color="#ef4444" />
+      <MetricItem
+        label="Events (5m)"
+        value={metrics.recentEvents}
+        color="#3b82f6"
+        onClick={() =>
+          onMetricFilter?.({
+            source: "metricCard",
+            recentWindowMinutes: 5,
+            label: "Events in last 5 minutes",
+          })
+        }
+      />
+      <MetricItem
+        label="Active Alerts"
+        value={metrics.activeAlerts}
+        color="#f59e0b"
+        onClick={() =>
+          onMetricFilter?.({
+            source: "metricCard",
+            alertsOnly: true,
+            label: "Active alerts context",
+          })
+        }
+      />
+      <MetricItem
+        label="Failed Logins (10m)"
+        value={metrics.failedLogins}
+        color="#ef4444"
+        onClick={() =>
+          onMetricFilter?.({
+            source: "metricCard",
+            eventCategory: "LOGIN_FAILED",
+            recentWindowMinutes: 10,
+            label: "Failed logins in last 10 minutes",
+          })
+        }
+      />
     </>
   );
 }
 
-function MetricItem({ label, value, color }) {
+function MetricItem({ label, value, color, onClick }) {
   return (
-    <article className="dash-card metric-card">
+    <article
+      className="dash-card metric-card"
+      onClick={onClick}
+      style={{ cursor: onClick ? "pointer" : "default" }}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClick && (e.key === "Enter" || e.key === " ")) onClick();
+      }}
+    >
       <div className="metric-label">
         {label}
       </div>

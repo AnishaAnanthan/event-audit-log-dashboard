@@ -2,10 +2,12 @@ import { useState, useEffect, useContext } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import { AuthContext } from '../../context/AuthContext';
+import { buildStackedChartData } from '../../utils/dashboardFilters';
+import LoadingSpinner from '../ui/LoadingSpinner';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-function StackedBarChart({ dateRange }) {
+function StackedBarChart({ dateRange, eventsOverride = null, onFilterSelect, sortMode = "dateAsc" }) {
   const { API, token } = useContext(AuthContext);
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -14,6 +16,11 @@ function StackedBarChart({ dateRange }) {
     const fetchData = async () => {
       setLoading(true);
       try {
+        if (Array.isArray(eventsOverride)) {
+          setChartData(buildStackedChartData(eventsOverride, dateRange, sortMode));
+          return;
+        }
+
         // Fetch events with a high limit to perform frontend aggregation
         // Since we cannot modify backend aggregation logic, we fetch raw data
         const query = new URLSearchParams({
@@ -26,58 +33,7 @@ function StackedBarChart({ dateRange }) {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        const events = data.events || [];
-        
-        // Process data
-        const dateMap = {};
-        
-        // Initialize dates in range
-        let currentDate = new Date(dateRange.start);
-        const end = new Date(dateRange.end);
-        while (currentDate <= end) {
-          const dateStr = currentDate.toISOString().split('T')[0];
-          dateMap[dateStr] = { LOGIN_SUCCESS: 0, LOGIN_FAILED: 0, ADMIN_ACTION: 0, OTHER_EVENTS: 0 };
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
-
-        events.forEach(event => {
-          const dateStr = new Date(event.createdAt).toISOString().split('T')[0];
-          if (dateMap[dateStr]) {
-            const type = event.eventType;
-            if (type.includes('LOGIN_SUCCESS')) dateMap[dateStr].LOGIN_SUCCESS++;
-            else if (type.includes('LOGIN_FAILED')) dateMap[dateStr].LOGIN_FAILED++;
-            else if (type.includes('ADMIN')) dateMap[dateStr].ADMIN_ACTION++;
-            else dateMap[dateStr].OTHER_EVENTS++;
-          }
-        });
-
-        const labels = Object.keys(dateMap).sort();
-        
-        setChartData({
-          labels,
-          datasets: [
-            {
-              label: 'Login Success',
-              data: labels.map(d => dateMap[d].LOGIN_SUCCESS),
-              backgroundColor: '#3b82f6', // Primary Blue
-            },
-            {
-              label: 'Login Failed',
-              data: labels.map(d => dateMap[d].LOGIN_FAILED),
-              backgroundColor: '#ef4444', // Danger Red
-            },
-            {
-              label: 'Admin Actions',
-              data: labels.map(d => dateMap[d].ADMIN_ACTION),
-              backgroundColor: '#8b5cf6', // Purple
-            },
-            {
-              label: 'Other Events',
-              data: labels.map(d => dateMap[d].OTHER_EVENTS),
-              backgroundColor: '#94a3b8', // Gray
-            },
-          ],
-        });
+        setChartData(buildStackedChartData(data.events || [], dateRange, sortMode));
       } catch (error) {
         console.error("Failed to fetch stacked chart data", error);
       } finally {
@@ -86,7 +42,7 @@ function StackedBarChart({ dateRange }) {
     };
 
     fetchData();
-  }, [API, token, dateRange]);
+  }, [API, token, dateRange, eventsOverride, sortMode]);
 
   const options = {
     responsive: true,
@@ -123,14 +79,33 @@ function StackedBarChart({ dateRange }) {
       },
       y: { stacked: true, grid: { color: '#f1f5f9' }, beginAtZero: true },
     },
+    onClick: (_event, elements) => {
+      if (!elements.length || !onFilterSelect || !chartData) return;
+      const first = elements[0];
+      const datasetLabel = chartData.datasets?.[first.datasetIndex]?.label;
+      const date = chartData.labels?.[first.index];
+      const categoryMap = {
+        'Login Success': 'LOGIN_SUCCESS',
+        'Login Failed': 'LOGIN_FAILED',
+        'Admin Actions': 'ADMIN_ACTION',
+        'Other Events': 'OTHER_EVENTS',
+      };
+
+      if (!datasetLabel || !date) return;
+
+      onFilterSelect({
+        source: 'eventActivity',
+        eventCategory: categoryMap[datasetLabel] || 'OTHER_EVENTS',
+        date,
+        label: `${datasetLabel} on ${date}`,
+      });
+    },
   };
 
   return (
     <div className="stacked-bar-wrap">
       {loading ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          Loading data...
-        </div>
+        <LoadingSpinner label="Loading activity chart" />
       ) : chartData ? (
         <Bar options={options} data={chartData} />
       ) : (

@@ -1,4 +1,5 @@
 const normalizeLoopback = (value: string) => value.replace("127.0.0.1", "localhost");
+const backendPort = Number(process.env.PLAYWRIGHT_BACKEND_PORT || 5001);
 
 export const testData = {
   admin: {
@@ -20,5 +21,5 @@ export const testData = {
 export const urls = {
   adminBase: normalizeLoopback(process.env.FRONTEND_BASE_URL || "http://localhost:5174"),
   userBase: normalizeLoopback(process.env.USER_APP_BASE_URL || "http://localhost:5173"),
-  apiBase: normalizeLoopback(process.env.API_BASE_URL || "http://localhost:5000"),
+  apiBase: normalizeLoopback(process.env.API_BASE_URL || `http://localhost:${backendPort}`),
 };

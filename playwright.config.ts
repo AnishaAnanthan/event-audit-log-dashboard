@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const backendPort = Number(process.env.PLAYWRIGHT_BACKEND_PORT || 5001);
 const frontendBaseUrl = process.env.FRONTEND_BASE_URL || "http://localhost:5174";
-const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:5000";
+const apiBaseUrl = process.env.API_BASE_URL || `http://localhost:${backendPort}`;
 
 export default defineConfig({
   testDir: "./tests",
@@ -21,11 +22,14 @@ export default defineConfig({
     {
       command: "npm run start",
       cwd: "backend",
-      port: 5000,
+      port: backendPort,
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
         ...process.env,
+        PORT: String(backendPort),
+        API_BASE_URL: `http://localhost:${backendPort}`,
+        INTERNAL_API_BASE_URL: `http://localhost:${backendPort}`,
         NODE_ENV: "test",
         LOGIN_RATE_LIMIT_MAX: "1000",
         LOGIN_RATE_LIMIT_WINDOW_MS: "1000",

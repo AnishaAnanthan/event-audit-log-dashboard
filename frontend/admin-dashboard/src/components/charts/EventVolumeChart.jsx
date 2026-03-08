@@ -2,6 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import { AuthContext } from '../../context/AuthContext';
+import LoadingSpinner from '../ui/LoadingSpinner';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -100,9 +101,11 @@ function EventVolumeChart({ dateRange }) {
       {chartData && chartData.labels.length > 0 ? (
         <Line options={options} data={chartData} />
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-          {chartData ? "No data available" : "Loading chart..."}
-        </div>
+        chartData ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>No data available</div>
+        ) : (
+          <LoadingSpinner label="Loading volume chart" />
+        )
       )}
     </div>
   );

@@ -10,6 +10,7 @@ function Login() {
   const [error, setError] = useState("");
   const { login, API } = useContext(AuthContext);
   const navigate = useNavigate();
+  const hasGoogleClient = Boolean(String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim());
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -104,16 +105,20 @@ function Login() {
             </button>
           </form>
 
-          <div className="auth-divider">
-            <span>Or continue with</span>
-          </div>
+          {hasGoogleClient ? (
+            <>
+              <div className="auth-divider">
+                <span>Or continue with</span>
+              </div>
 
-          <div className="flex justify-center" style={{ marginBottom: "1rem" }}>
-            <GoogleLogin
-              onSuccess={handleGoogleSuccess}
-              onError={() => setError("Google login process failed.")}
-            />
-          </div>
+              <div className="flex justify-center" style={{ marginBottom: "1rem" }}>
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => setError("Google login process failed.")}
+                />
+              </div>
+            </>
+          ) : null}
 
           <p className="auth-footnote">
             Need an admin account?{" "}
