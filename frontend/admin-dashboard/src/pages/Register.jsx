@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import axios from "axios";
+import { AuthContext } from "../context/AuthContext";
 
 function Register() {
   const [formData, setFormData] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const { API } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -18,7 +19,7 @@ function Register() {
     setError("");
     setSuccess("");
     try {
-      await axios.post("http://localhost:5000/api/auth/admin/register", formData);
+      await API.post("/api/auth/admin/register", formData);
       setSuccess("Admin registered successfully! Redirecting to login...");
       setTimeout(() => navigate("/login"), 1800);
     } catch (err) {
