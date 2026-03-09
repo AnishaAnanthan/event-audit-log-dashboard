@@ -3597,3 +3597,51 @@ body {
     margin-left: 0 !important;
   }
 }
+
+/* Force identical menu icon placement across Dashboard/Audit/Alerts */
+.dashboard-page.dashboard-redesign .dashboard-menu-icon.fixed-top-left,
+.audit-logs-redesign .dashboard-menu-icon.fixed-top-left,
+.alerts-redesign .dashboard-menu-icon.fixed-top-left {
+  position: fixed !important;
+  top: calc(10px + env(safe-area-inset-top, 0px)) !important;
+  left: 8px !important;
+  width: 44px !important;
+  height: 44px !important;
+  z-index: 180 !important;
+  transform: translateZ(0);
+}
+
+.dashboard-page.dashboard-redesign .dashboard-top-shell,
+.audit-logs-redesign .audit-top-shell,
+.alerts-redesign .alerts-top-shell {
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.main-content-dark-dashboard .topbar-title {
+  margin-left: 3.25rem !important;
+}
+
+/* Log Import upload card: remove oversized outer shell and keep compact center card */
+.log-import-page-upload {
+  width: min(740px, 92vw) !important;
+  margin: 0.35rem auto 0.6rem !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.log-import-page-upload .dash-card-header {
+  margin-bottom: 0.45rem !important;
+  justify-content: center !important;
+}
+
+.log-import-page-upload .menu-log-import-popup.inline {
+  width: 100% !important;
+  border-radius: 14px !important;
+  border: 1px solid #355c8d !important;
+  background: linear-gradient(180deg, #0d223f 0%, #0b1b34 100%) !important;
+  box-shadow: 0 10px 24px rgba(5, 16, 34, 0.38) !important;
+}

@@ -1,8 +1,78 @@
 import axios from "axios";
 import { MCP_TOOLS } from "../mcp/tools.schema.js";
 
+const parseKeyList = (value = "") =>
+  String(value || "")
+    .split(/[\n,;]+/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const mergeUniqueKeys = (...groups) => {
+  const seen = new Set();
+  const merged = [];
+  groups.flat().forEach((key) => {
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    merged.push(key);
+  });
+  return merged;
+};
+
+const aiKeyState = {
+  openai: { cursor: 0, cooldownUntil: new Map() },
+  gemini: { cursor: 0, cooldownUntil: new Map() },
+};
+
+const getKeyCooldownMs = () => {
+  const parsed = Number(process.env.AI_KEY_COOLDOWN_MS || 300000);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 300000;
+  return parsed;
+};
+
+const getAuthCooldownMs = () => {
+  const parsed = Number(process.env.AI_AUTH_KEY_COOLDOWN_MS || 3600000);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 3600000;
+  return parsed;
+};
+
+const pickProviderKey = (providerName, keys = []) => {
+  const state = aiKeyState[providerName];
+  const now = Date.now();
+
+  for (let attempts = 0; attempts < keys.length; attempts += 1) {
+    const idx = (state.cursor + attempts) % keys.length;
+    const candidate = keys[idx];
+    const blockedUntil = state.cooldownUntil.get(candidate) || 0;
+    if (blockedUntil > now) continue;
+    state.cursor = (idx + 1) % keys.length;
+    return candidate;
+  }
+
+  return null;
+};
+
+const cooldownProviderKey = (providerName, key, ms) => {
+  if (!key) return;
+  aiKeyState[providerName].cooldownUntil.set(key, Date.now() + Math.max(1000, ms));
+};
+
+const clearProviderKeyCooldown = (providerName, key) => {
+  if (!key) return;
+  aiKeyState[providerName].cooldownUntil.delete(key);
+};
+
 const getAiConfig = () => {
   const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+  const geminiKeys = mergeUniqueKeys(
+    parseKeyList(process.env.GEMINI_API_KEYS),
+    parseKeyList(process.env.GOOGLE_API_KEYS),
+    parseKeyList(geminiKey)
+  );
+  const openAiKeys = mergeUniqueKeys(
+    parseKeyList(process.env.OPENAI_API_KEYS),
+    parseKeyList(process.env.OPENAI_API_KEY)
+  );
+
   const aiProvider = (process.env.AI_PROVIDER || (geminiKey ? "gemini" : "openai"))
     .toLowerCase()
     .trim();
@@ -14,8 +84,10 @@ const getAiConfig = () => {
     maxOutputTokens: Math.min(Number(process.env.AI_MAX_OUTPUT_TOKENS || 500), 1000),
     maxToolCalls: Math.min(Number(process.env.AI_MAX_TOOL_CALLS || 5), 10),
     timeoutMs: Number(process.env.AI_TIMEOUT_MS || 15000),
-    openAiKey: process.env.OPENAI_API_KEY || "",
-    geminiKey,
+    openAiKey: openAiKeys[0] || "",
+    geminiKey: geminiKeys[0] || "",
+    openAiKeys,
+    geminiKeys,
   };
 };
 
@@ -98,15 +170,18 @@ const callMcpTool = async ({ authHeader, toolName, args }) => {
 };
 
 const callOpenAI = async ({ messages, tools }) => {
-  const { openAiKey, openAiModel, maxOutputTokens, timeoutMs } = getAiConfig();
-  const apiKey = openAiKey;
-  if (!apiKey) {
+  const { openAiKeys, openAiModel, maxOutputTokens, timeoutMs } = getAiConfig();
+  if (!openAiKeys.length) {
     const err = new Error("OPENAI_API_KEY is not configured");
     err.statusCode = 503;
     throw err;
   }
 
-  try {
+  let lastError = null;
+  for (let attempt = 0; attempt < openAiKeys.length; attempt += 1) {
+    const apiKey = pickProviderKey("openai", openAiKeys);
+    if (!apiKey) break;
+
     const payload = {
       model: openAiModel,
       messages,
@@ -119,74 +194,102 @@ const callOpenAI = async ({ messages, tools }) => {
       payload.tool_choice = "auto";
     }
 
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        timeout: timeoutMs,
-      }
-    );
-
-    return response.data;
-  } catch (error) {
-    const status = error?.response?.status;
-    const upstreamMessage =
-      error?.response?.data?.error?.message || error?.response?.data?.message || error?.message;
-
-    if (status === 400) {
-      const err = new Error(`OpenAI request rejected: ${upstreamMessage}`);
-      err.statusCode = 502;
-      err.details = upstreamMessage;
-      throw err;
-    }
-
-    if (status === 429) {
-      const err = new Error(
-        "AI provider rate limit/quota reached. Retry after some time or check provider usage/billing."
+    try {
+      const response = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          timeout: timeoutMs,
+        }
       );
-      err.statusCode = 429;
-      err.details = upstreamMessage;
-      throw err;
-    }
 
-    if (status === 401 || status === 403) {
-      const err = new Error("AI provider authentication failed. Check OPENAI_API_KEY.");
+      clearProviderKeyCooldown("openai", apiKey);
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      const status = error?.response?.status;
+      const upstreamMessage =
+        error?.response?.data?.error?.message || error?.response?.data?.message || error?.message;
+
+      if (status === 429) {
+        cooldownProviderKey("openai", apiKey, getKeyCooldownMs());
+        continue;
+      }
+
+      if (status === 401 || status === 403) {
+        cooldownProviderKey("openai", apiKey, getAuthCooldownMs());
+        continue;
+      }
+
+      if (status === 400) {
+        const err = new Error(`OpenAI request rejected: ${upstreamMessage}`);
+        err.statusCode = 502;
+        err.details = upstreamMessage;
+        throw err;
+      }
+
+      if (error?.code === "ECONNABORTED") {
+        const err = new Error("AI provider timeout. Please retry.");
+        err.statusCode = 504;
+        err.details = upstreamMessage;
+        throw err;
+      }
+
+      const err = new Error("AI provider request failed");
       err.statusCode = 502;
       err.details = upstreamMessage;
       throw err;
     }
+  }
 
-    if (error?.code === "ECONNABORTED") {
-      const err = new Error("AI provider timeout. Please retry.");
-      err.statusCode = 504;
-      err.details = upstreamMessage;
-      throw err;
-    }
+  const lastStatus = lastError?.response?.status;
+  const lastMessage =
+    lastError?.response?.data?.error?.message ||
+    lastError?.response?.data?.message ||
+    lastError?.message;
 
-    const err = new Error("AI provider request failed");
-    err.statusCode = 502;
-    err.details = upstreamMessage;
+  if (lastStatus === 429) {
+    const err = new Error(
+      "All configured OpenAI keys are rate-limited/quota-exhausted. Retry after cooldown."
+    );
+    err.statusCode = 429;
+    err.details = lastMessage;
     throw err;
   }
+
+  if (lastStatus === 401 || lastStatus === 403) {
+    const err = new Error("All configured OpenAI keys failed authentication.");
+    err.statusCode = 502;
+    err.details = lastMessage;
+    throw err;
+  }
+
+  const err = new Error("AI provider request failed");
+  err.statusCode = 502;
+  err.details = lastMessage;
+  throw err;
 };
 
 const callGemini = async ({ contents, tools }) => {
-  const { geminiKey, geminiModel, maxOutputTokens, timeoutMs } = getAiConfig();
-  const apiKey = geminiKey;
-  if (!apiKey) {
+  const { geminiKeys, geminiModel, maxOutputTokens, timeoutMs } = getAiConfig();
+  if (!geminiKeys.length) {
     const err = new Error("GEMINI_API_KEY (or GOOGLE_API_KEY) is not configured");
     err.statusCode = 503;
     throw err;
   }
 
-  const model = geminiModel;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  let lastError = null;
+  for (let attempt = 0; attempt < geminiKeys.length; attempt += 1) {
+    const apiKey = pickProviderKey("gemini", geminiKeys);
+    if (!apiKey) break;
 
-  try {
+    const model = geminiModel;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
     const payload = {
       contents,
       generationConfig: {
@@ -199,56 +302,80 @@ const callGemini = async ({ contents, tools }) => {
       payload.tools = tools.tools;
     }
 
-    const response = await axios.post(
-      url,
-      payload,
-      {
-        headers: { "Content-Type": "application/json" },
-        timeout: timeoutMs,
-      }
-    );
-
-    return response.data;
-  } catch (error) {
-    const status = error?.response?.status;
-    const upstreamMessage =
-      error?.response?.data?.error?.message || error?.response?.data?.message || error?.message;
-
-    if (status === 400) {
-      const err = new Error(`Gemini request rejected: ${upstreamMessage}`);
-      err.statusCode = 502;
-      err.details = upstreamMessage;
-      throw err;
-    }
-
-    if (status === 429) {
-      const err = new Error(
-        "AI provider rate limit/quota reached. Retry after some time or check provider usage/billing."
+    try {
+      const response = await axios.post(
+        url,
+        payload,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: timeoutMs,
+        }
       );
-      err.statusCode = 429;
-      err.details = upstreamMessage;
-      throw err;
-    }
+      clearProviderKeyCooldown("gemini", apiKey);
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      const status = error?.response?.status;
+      const upstreamMessage =
+        error?.response?.data?.error?.message || error?.response?.data?.message || error?.message;
 
-    if (status === 401 || status === 403) {
-      const err = new Error("AI provider authentication failed. Check GEMINI_API_KEY.");
+      if (status === 429) {
+        cooldownProviderKey("gemini", apiKey, getKeyCooldownMs());
+        continue;
+      }
+
+      if (status === 401 || status === 403) {
+        cooldownProviderKey("gemini", apiKey, getAuthCooldownMs());
+        continue;
+      }
+
+      if (status === 400) {
+        const err = new Error(`Gemini request rejected: ${upstreamMessage}`);
+        err.statusCode = 502;
+        err.details = upstreamMessage;
+        throw err;
+      }
+
+      if (error?.code === "ECONNABORTED") {
+        const err = new Error("AI provider timeout. Please retry.");
+        err.statusCode = 504;
+        err.details = upstreamMessage;
+        throw err;
+      }
+
+      const err = new Error("AI provider request failed");
       err.statusCode = 502;
       err.details = upstreamMessage;
       throw err;
     }
+  }
 
-    if (error?.code === "ECONNABORTED") {
-      const err = new Error("AI provider timeout. Please retry.");
-      err.statusCode = 504;
-      err.details = upstreamMessage;
-      throw err;
-    }
+  const lastStatus = lastError?.response?.status;
+  const lastMessage =
+    lastError?.response?.data?.error?.message ||
+    lastError?.response?.data?.message ||
+    lastError?.message;
 
-    const err = new Error("AI provider request failed");
-    err.statusCode = 502;
-    err.details = upstreamMessage;
+  if (lastStatus === 429) {
+    const err = new Error(
+      "All configured Gemini keys are rate-limited/quota-exhausted. Retry after cooldown."
+    );
+    err.statusCode = 429;
+    err.details = lastMessage;
     throw err;
   }
+
+  if (lastStatus === 401 || lastStatus === 403) {
+    const err = new Error("All configured Gemini keys failed authentication.");
+    err.statusCode = 502;
+    err.details = lastMessage;
+    throw err;
+  }
+
+  const err = new Error("AI provider request failed");
+  err.statusCode = 502;
+  err.details = lastMessage;
+  throw err;
 };
 
 const safeParseToolArgs = (raw) => {

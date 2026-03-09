@@ -328,7 +328,12 @@ function Alerts() {
     <SectionCard className="alerts-redesign">
       <div className="alerts-layout-grid">
         <div className="dashboard-top-shell alerts-top-shell">
-          <button type="button" className="dashboard-menu-icon fixed-top-left" aria-label="Menu" onClick={() => setMenuOpen(true)}>
+          <button
+            type="button"
+            className="dashboard-menu-icon fixed-top-left"
+            aria-label="Menu"
+            onClick={() => setMenuOpen(true)}
+          >
             {"\u2630"}
           </button>
         </div>
