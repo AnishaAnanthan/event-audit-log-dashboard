@@ -25,7 +25,27 @@ app.set("trust proxy", Number(process.env.TRUST_PROXY_HOPS || 1)); // Safer prox
 app.use(helmet());
 
 /* CORS */
-app.use(cors());
+const allowedOrigins = (process.env.FRONTEND_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    credentials: true,
+    origin(origin, callback) {
+      // Allow non-browser/server-side requests (Postman, curl, internal jobs)
+      if (!origin) return callback(null, true);
+
+      // If allowlist is not configured, keep current permissive behavior
+      if (!allowedOrigins.length) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+  })
+);
 
 
 /* Body parser */
