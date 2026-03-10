@@ -1,7 +1,8 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useMemo } from 'react';
 import { Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { AuthContext } from '../../context/AuthContext';
+import { ThemeContext } from '../../context/ThemeContext';
 import { buildEventDistributionData } from '../../utils/dashboardFilters';
 import LoadingSpinner from '../ui/LoadingSpinner';
 
@@ -9,9 +10,25 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 
 function EventDistributionChart({ eventsOverride = null, onFilterSelect }) {
   const { API, token } = useContext(AuthContext);
+  const { theme } = useContext(ThemeContext);
   const [chartData, setChartData] = useState(null);
 
-  const mutedPalette = ['#4f7fb8', '#2f9d7a', '#d26767', '#c99a2a', '#7f6bcf', '#af5f94', '#5b84d1', '#5ea8e6'];
+  const palette = useMemo(() => {
+    const mutedPalette = ['#4f7fb8', '#2f9d7a', '#d26767', '#c99a2a', '#7f6bcf', '#af5f94', '#5b84d1', '#5ea8e6'];
+    const brightPalette = [
+      '#2563eb',
+      '#16a34a',
+      '#f97316',
+      '#ef4444',
+      '#a855f7',
+      '#14b8a6',
+      '#eab308',
+      '#0ea5e9',
+      '#db2777',
+      '#4f46e5',
+    ];
+    return theme === 'light' ? brightPalette : mutedPalette;
+  }, [theme]);
 
   useEffect(() => {
     const fetchChartData = async () => {
@@ -22,7 +39,7 @@ function EventDistributionChart({ eventsOverride = null, onFilterSelect }) {
             ...built,
             datasets: (built.datasets || []).map((dataset) => ({
               ...dataset,
-              backgroundColor: (dataset.backgroundColor || []).map((_, index) => mutedPalette[index % mutedPalette.length]),
+              backgroundColor: (dataset.backgroundColor || []).map((_, index) => palette[index % palette.length]),
               borderColor: '#d1def6',
               borderWidth: 1.5,
             })),
@@ -40,14 +57,7 @@ function EventDistributionChart({ eventsOverride = null, onFilterSelect }) {
             {
               label: '# of Events',
               data: data.data,
-              backgroundColor: [
-                '#4f7fb8',
-                '#2f9d7a',
-                '#d26767',
-                '#c99a2a',
-                '#7f6bcf',
-                '#af5f94',
-              ],
+              backgroundColor: (data.labels || []).map((_, index) => palette[index % palette.length]),
               borderColor: '#d1def6',
               borderWidth: 1.5,
               hoverOffset: 4
@@ -59,7 +69,7 @@ function EventDistributionChart({ eventsOverride = null, onFilterSelect }) {
       }
     };
     fetchChartData();
-  }, [API, token, eventsOverride]);
+  }, [API, token, eventsOverride, palette]);
 
   const options = {
     responsive: true,

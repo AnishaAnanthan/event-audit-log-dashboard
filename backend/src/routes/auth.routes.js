@@ -12,6 +12,8 @@ import {
   adminLogin,
   getAdminUsers,
   getAdminUserById,
+  verifyEmail,
+  resendOtp,
 } from "../controllers/auth.controller.js";
 import { admin, protect } from "../middlewares/auth.middleware.js";
 import rateLimit from 'express-rate-limit';
@@ -27,11 +29,23 @@ const loginLimiter = rateLimit({
   },
 });
 
+const otpLimiter = rateLimit({
+  windowMs: Number(process.env.OTP_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000), // 10 minutes
+  max: Number(process.env.OTP_RATE_LIMIT_MAX || 3), // 3 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: "Too many OTP requests. Please try again later." });
+  },
+});
+
 const router = express.Router();
 
 router.post("/register", validateRegisterBody, register);
 
 router.post("/admin/register", validateRegisterBody, adminRegister);
+router.post("/verify-email", otpLimiter, verifyEmail);
+router.post("/resend-otp", otpLimiter, resendOtp);
 
 /* --- LOGIN ROUTES --- */
 router.post("/login", loginLimiter, validateLoginBody, login);

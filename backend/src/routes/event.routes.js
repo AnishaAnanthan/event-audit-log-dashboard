@@ -9,6 +9,7 @@ import {
     getRecentActivity,
     getUserEvents,
     getGeoHeatmap,
+    getWorldMapStats,
     getUsageMetrics,
     getUserSecurityInsights,
     getImportedSessionProfile
@@ -23,6 +24,7 @@ router.get('/admin/stats', protect, admin, getAdminStats);
 router.get('/admin/stats/volume', protect, admin, validateDateRangeQuery, getEventVolume);
 router.get('/admin/stats/distribution', protect, admin, getEventDistribution);
 router.get('/admin/stats/heatmap', protect, admin, validateDateRangeQuery, getGeoHeatmap);
+router.get('/admin/stats/world-map', protect, admin, validateDateRangeQuery, getWorldMapStats);
 router.get('/admin/stats/usage', protect, admin, getUsageMetrics);
 router.get('/admin/all', protect, admin, validateDateRangeQuery, getAllEvents);
 router.get('/admin/import-profile', protect, admin, validateDateRangeQuery, getImportedSessionProfile);

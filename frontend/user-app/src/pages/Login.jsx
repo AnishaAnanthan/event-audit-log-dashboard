@@ -25,8 +25,8 @@ function Login() {
       login(data);
       setPopup({ type: "success", message: "Login Successful!" });
       setTimeout(() => navigate("/dashboard"), 1500);
-    } catch {
-      setPopup({ type: "error", message: "Invalid credentials" });
+    } catch (error) {
+      setPopup({ type: "error", message: error.response?.data?.message || "Invalid credentials" });
       setTimeout(() => setPopup(null), 3000);
     }
   };

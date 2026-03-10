@@ -6,6 +6,8 @@ import Event from "../models/event.model.js";
 import Alert from "../models/alert.model.js";
 import { logEvent, triggerAlert, updateRiskScore } from "./event.controller.js";
 import { OAuth2Client } from "google-auth-library";
+import crypto from "crypto";
+import { sendVerificationEmail } from "../utils/sendEmail.js";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -22,6 +24,11 @@ const hashPasswordIfNeeded = async (value) => {
 
 const isAdminRole = (role) => String(role || "").toLowerCase() === "admin";
 const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
+const OTP_TTL_MINUTES = Number(process.env.EMAIL_OTP_TTL_MINUTES || 10);
+
+const generateOtp = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+const buildOtpExpiry = () => new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+const isOtpExpired = (expiresAt) => !expiresAt || new Date(expiresAt).getTime() < Date.now();
 
 const computeEffectiveRiskScore = async (user) => {
   if (!user?._id) return Number(user?.riskScore || 0);
@@ -88,12 +95,22 @@ export const register = async (req, res) => {
     }
 
     const safePassword = await hashPasswordIfNeeded(password);
-    const user = await User.create({ name, email, password: safePassword });
-    const token = generateToken(user._id);
+    const otp = generateOtp();
+    const otpExpiresAt = buildOtpExpiry();
+    const user = await User.create({
+      name,
+      email,
+      password: safePassword,
+      emailVerified: false,
+      emailVerificationOtp: otp,
+      otpExpiresAt,
+    });
 
     await logEvent("USER_REGISTERED", { req, userId: user._id, data: { email } });
 
-    res.status(201).json({ token, user: { _id: user._id, name: user.name, email: user.email, role: user.role } });
+    await sendVerificationEmail(email, otp);
+
+    res.status(201).json({ message: "Registration successful. Please verify your email." });
   } catch (error) {
     if (error?.code === 11000) {
       return res.status(400).json({ message: "User already exists" });
@@ -120,6 +137,9 @@ export const login = async (req, res) => {
 
     const isValidPassword = user ? await user.matchPassword(password) : false;
     if (user && isValidPassword) {
+      if (!user.emailVerified) {
+        return res.status(403).json({ message: "Please verify your email before logging in" });
+      }
       // Device Fingerprinting
       const userAgent = req.headers['user-agent'];
       if (user.knownDevices && !user.knownDevices.includes(userAgent)) {
@@ -159,6 +179,9 @@ export const adminLogin = async (req, res) => {
 
     const isValidPassword = user ? await user.matchPassword(password) : false;
     if (user && isValidPassword && isAdminRole(user.role)) {
+      if (!user.emailVerified) {
+        return res.status(403).json({ message: "Please verify your email before logging in" });
+      }
       const token = generateToken(user._id);
       await logEvent("ADMIN_LOGIN_SUCCESS", { req, userId: user._id, data: { email } });
       res.json({ token, user: { _id: user._id, name: user.name, email: user.email, role: user.role } });
@@ -186,11 +209,21 @@ export const adminRegister = async (req, res) => {
     if (userExists) return res.status(400).json({ message: "User already exists" });
 
     const safePassword = await hashPasswordIfNeeded(password);
-    const user = await User.create({ name, email, password: safePassword, role: "admin" });
-    const token = generateToken(user._id);
+    const otp = generateOtp();
+    const otpExpiresAt = buildOtpExpiry();
+    const user = await User.create({
+      name,
+      email,
+      password: safePassword,
+      role: "admin",
+      emailVerified: false,
+      emailVerificationOtp: otp,
+      otpExpiresAt,
+    });
     
     await logEvent("ADMIN_REGISTERED", { req, userId: user._id, data: { email } });
-    res.status(201).json({ token, user: { _id: user._id, name: user.name, email: user.email, role: user.role } });
+    await sendVerificationEmail(email, otp);
+    res.status(201).json({ message: "Registration successful. Please verify your email." });
   } catch (error) {
     if (error?.code === 11000) {
       return res.status(400).json({ message: "User already exists" });
@@ -208,7 +241,21 @@ export const googleLogin = async (req, res) => {
 
     let user = await User.findOne({ email });
     if (!user) {
-      user = await User.create({ name, email, googleId, provider: "google", password: "google-login-no-pass" });
+      user = await User.create({
+        name,
+        email,
+        googleId,
+        provider: "google",
+        password: "google-login-no-pass",
+        emailVerified: true,
+        emailVerificationOtp: null,
+        otpExpiresAt: null,
+      });
+    } else if (!user.emailVerified) {
+      user.emailVerified = true;
+      user.emailVerificationOtp = null;
+      user.otpExpiresAt = null;
+      await user.save();
     }
 
     const jwtToken = generateToken(user._id);
@@ -230,6 +277,12 @@ export const adminGoogleLogin = async (req, res) => {
 
     // CRITICAL CHECK: User must exist and be an admin
     if (user && user.role === 'admin') {
+      if (!user.emailVerified) {
+        user.emailVerified = true;
+        user.emailVerificationOtp = null;
+        user.otpExpiresAt = null;
+        await user.save();
+      }
       const jwtToken = generateToken(user._id);
       await logEvent("ADMIN_GOOGLE_LOGIN_SUCCESS", { req, userId: user._id, data: { email } });
       res.json({ token: jwtToken, user: { _id: user._id, name: user.name, email: user.email, role: user.role } });
@@ -284,6 +337,68 @@ export const deleteAccount = async (req, res) => {
   await logEvent("ACCOUNT_DELETED", { req, userId: req.user._id });
   await User.findByIdAndDelete(req.user._id);
   res.json({ message: "Account deleted" });
+};
+
+export const verifyEmail = async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const otp = String(req.body?.otp || "").trim();
+    if (!email || otp.length !== 6) {
+      return res.status(400).json({ message: "Email and valid OTP are required" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (user.emailVerified) {
+      return res.json({ message: "Email already verified" });
+    }
+    if (user.emailVerificationOtp !== otp) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+    if (isOtpExpired(user.otpExpiresAt)) {
+      return res.status(400).json({ message: "OTP expired. Please request a new one." });
+    }
+
+    user.emailVerified = true;
+    user.emailVerificationOtp = null;
+    user.otpExpiresAt = null;
+    await user.save();
+
+    return res.json({ message: "Email verified successfully" });
+  } catch (error) {
+    console.error("verifyEmail error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const resendOtp = async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (user.emailVerified) {
+      return res.json({ message: "Email already verified" });
+    }
+
+    const otp = generateOtp();
+    user.emailVerificationOtp = otp;
+    user.otpExpiresAt = buildOtpExpiry();
+    await user.save();
+    await sendVerificationEmail(email, otp);
+
+    return res.json({ message: "OTP resent successfully" });
+  } catch (error) {
+    console.error("resendOtp error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
 };
 
 export const getAdminUsers = async (_req, res) => {

@@ -2,6 +2,7 @@ import { useState, useEffect, useContext, useMemo } from 'react';
 import { Doughnut } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { AuthContext } from '../../context/AuthContext';
+import { ThemeContext } from '../../context/ThemeContext';
 import { buildAlertSeverityData } from '../../utils/dashboardFilters';
 import LoadingSpinner from '../ui/LoadingSpinner';
 
@@ -9,6 +10,7 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 
 function AlertSeverityDonut({ alertsOverride = null, summaryOverride = null, onFilterSelect }) {
   const { API, token } = useContext(AuthContext);
+  const { theme } = useContext(ThemeContext);
   const [chartData, setChartData] = useState(null);
   const overrideComputed = useMemo(() => {
     if (summaryOverride?.chartData) return summaryOverride;
@@ -84,19 +86,21 @@ function AlertSeverityDonut({ alertsOverride = null, summaryOverride = null, onF
       const width = chart.width, height = chart.height, ctx = chart.ctx;
       const values = chart?.data?.datasets?.[0]?.data || [];
       const liveTotal = values.reduce((sum, value) => sum + Number(value || 0), 0);
+      const valueColor = theme === 'light' ? '#0f172a' : '#f8fafc';
+      const labelColor = theme === 'light' ? '#64748b' : '#9db2da';
       ctx.restore();
       const valueFontSize = Math.max(28, Math.min(44, Math.round(height * 0.13)));
       const labelFontSize = Math.max(11, Math.min(14, Math.round(height * 0.04)));
       ctx.font = `700 ${valueFontSize}px Inter, sans-serif`;
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "#f8fafc";
+      ctx.fillStyle = valueColor;
       const text = String(liveTotal);
       const textX = Math.round((width - ctx.measureText(text).width) / 2);
       const textY = Math.round(height / 2) - 10;
       ctx.fillText(text, textX, textY);
       
       ctx.font = `500 ${labelFontSize}px Inter, sans-serif`;
-      ctx.fillStyle = "#9db2da";
+      ctx.fillStyle = labelColor;
       const label = "Total Alerts";
       const labelX = Math.round((width - ctx.measureText(label).width) / 2);
       const labelY = textY + 28;

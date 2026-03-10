@@ -2,7 +2,7 @@ import { useEffect, useState, useContext, useMemo } from "react";
 import { AuthContext } from "../context/AuthContext";
 import SectionCard from "../components/ui/SectionCard";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { Doughnut, Line } from "react-chartjs-2";
 import {
   ArcElement,
@@ -19,9 +19,8 @@ import {
 ChartJS.register(ArcElement, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
 
 function Alerts() {
-  const { API, token, logout } = useContext(AuthContext);
+  const { API, token } = useContext(AuthContext);
   const location = useLocation();
-  const navigate = useNavigate();
   const [alerts, setAlerts] = useState([]);
   const [importEvents, setImportEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,7 +29,6 @@ function Alerts() {
   const [triagingId, setTriagingId] = useState(null);
   const [triageById, setTriageById] = useState({});
   const [page, setPage] = useState(1);
-  const [menuOpen, setMenuOpen] = useState(false);
   const pageSize = 15;
   const importSessionId = useMemo(
     () => new URLSearchParams(location.search).get("importSessionId") || "",
@@ -327,45 +325,6 @@ function Alerts() {
   return (
     <SectionCard className="alerts-redesign">
       <div className="alerts-layout-grid">
-        <div className="dashboard-top-shell alerts-top-shell">
-          <button
-            type="button"
-            className="dashboard-menu-icon fixed-top-left"
-            aria-label="Menu"
-            onClick={() => setMenuOpen(true)}
-          >
-            {"\u2630"}
-          </button>
-        </div>
-
-        {menuOpen && (
-          <>
-            <div className="dashboard-menu-backdrop" onClick={() => { setMenuOpen(false); }} />
-            <aside className="dashboard-floating-menu">
-              <div className="dashboard-floating-menu-title">Menu</div>
-              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/"); setMenuOpen(false); }}>
-                Dashboard
-              </button>
-              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/logs"); setMenuOpen(false); }}>
-                Audit Logs
-              </button>
-              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/alerts"); setMenuOpen(false); }}>
-                Alerts
-              </button>
-              <button
-                type="button"
-                className="dashboard-floating-menu-item"
-                onClick={() => { navigate("/log-import"); setMenuOpen(false); }}
-              >
-                Log Import
-              </button>
-              <button type="button" className="dashboard-floating-menu-item danger" onClick={logout}>
-                Logout
-              </button>
-            </aside>
-          </>
-        )}
-
         <section className="alerts-top-charts">
           <article className="alerts-summary-card">
             <div className="alerts-donut-wrap">
@@ -394,7 +353,7 @@ function Alerts() {
           </article>
 
           <article className="alerts-rate-card">
-            <div className="alerts-rate-title">Rate Chart</div>
+            <div className="alerts-rate-title">Alert Trend</div>
             <div className="alerts-rate-wrap">
               <Line
                 data={rateChartData}
@@ -448,8 +407,72 @@ function Alerts() {
         {loading ? (
           <LoadingSpinner label="Loading alerts" className="alerts-inline-loader" />
         ) : (
-          <div className="table-container alerts-table-wrap">
-            <table className="alerts-table">
+          <>
+            <div className="alerts-cards-mobile">
+              {pagedAlerts.length > 0 ? (
+                pagedAlerts.map((alert) => (
+                  <div key={`mobile-${alert._id}`} className="alerts-card">
+                    <div className="alerts-card-header">
+                      <span
+                        className={`alerts-chip alerts-chip-${String(alert.severity || "LOW").toLowerCase()}`}
+                      >
+                        {alert.severity}
+                      </span>
+                      <span className="alerts-card-type">{alert.type}</span>
+                      <span className="alerts-card-time">{new Date(alert.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div className="alerts-card-row">
+                      <span className="alerts-card-label">Target</span>
+                      <span className="alerts-card-value">{alert.email || alert.ipAddress || "-"}</span>
+                    </div>
+                    <div className="alerts-card-row">
+                      <span className="alerts-card-label">Count</span>
+                      <span className="alerts-card-value">{alert.occurrenceCount}</span>
+                    </div>
+                    <div className="alerts-card-row">
+                      <span className="alerts-card-label">Status</span>
+                      <span className={`audit-status ${alert.status === "ACTIVE" ? "failed" : "success"}`}>
+                        {alert.status}
+                      </span>
+                    </div>
+                    <div className="alerts-card-message">{alert.message}</div>
+                    <div className="alerts-card-actions">
+                      {alert._imported ? (
+                        <span className="alerts-card-muted">-</span>
+                      ) : (
+                        <>
+                          {alert.status === "ACTIVE" && (
+                            <button onClick={() => handleResolve(alert._id)} className="action-btn action-btn-resolve">
+                              Resolve
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleAiTriage(alert._id, false)}
+                            disabled={triagingId !== null}
+                            className="action-btn action-btn-ai"
+                          >
+                            {triagingId === `${alert._id}:triage` ? "Triaging..." : "AI Triage"}
+                          </button>
+                          {alert.status === "ACTIVE" && (
+                            <button
+                              onClick={() => handleAiTriage(alert._id, true)}
+                              disabled={triagingId !== null}
+                              className="action-btn action-btn-ai-resolve"
+                            >
+                              {triagingId === `${alert._id}:resolve` ? "Processing..." : "AI + Resolve"}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="alerts-card-empty">No alerts found matching criteria.</div>
+              )}
+            </div>
+            <div className="table-container alerts-table-wrap">
+              <table className="alerts-table">
               <thead>
                 <tr>
                   <th>Severity</th>
@@ -552,6 +575,7 @@ function Alerts() {
               </tbody>
             </table>
           </div>
+        </>
         )}
 
         {!loading && filteredSourceAlerts.length > 0 && (

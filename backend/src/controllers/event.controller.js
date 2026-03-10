@@ -672,6 +672,82 @@ export const getGeoHeatmap = async (req, res) => {
   }
 };
 
+export const getWorldMapStats = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const query = {
+      $or: [
+        { "geoLocation.country": { $exists: true, $ne: null } },
+        { country: { $exists: true, $ne: null } },
+      ],
+    };
+
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) query.createdAt.$gte = new Date(`${startDate}T00:00:00.000Z`);
+      if (endDate) query.createdAt.$lte = new Date(`${endDate}T23:59:59.999Z`);
+    }
+
+    const grouped = await Event.aggregate([
+      { $match: query },
+      {
+        $addFields: {
+          resolvedCountry: { $ifNull: ["$geoLocation.country", "$country"] },
+        },
+      },
+      {
+        $group: {
+          _id: "$resolvedCountry",
+          events: { $sum: 1 },
+          failedLogins: {
+            $sum: {
+              $cond: [{ $in: ["$eventType", ["LOGIN_FAILED", "ADMIN_LOGIN_FAILED"]] }, 1, 0],
+            },
+          },
+          uniqueUsers: {
+            $addToSet: {
+              $ifNull: ["$userId", "$metadata.email"],
+            },
+          },
+        },
+      },
+      { $sort: { events: -1 } },
+    ]);
+
+    const countries = grouped
+      .map((item) => {
+        const name = String(item?._id || "").trim();
+        if (!name) return null;
+        return {
+          country: name,
+          events: Number(item?.events || 0),
+          failedLogins: Number(item?.failedLogins || 0),
+          uniqueUsers: Array.isArray(item?.uniqueUsers)
+            ? item.uniqueUsers.filter(Boolean).length
+            : 0,
+        };
+      })
+      .filter(Boolean);
+
+    const localEvents = countries
+      .filter((row) => String(row.country || "").toUpperCase() === "LOCAL")
+      .reduce((sum, row) => sum + Number(row.events || 0), 0);
+
+    const nonLocal = countries.filter((row) => String(row.country || "").toUpperCase() !== "LOCAL");
+
+    return res.json({
+      summary: {
+        totalEvents: countries.reduce((sum, row) => sum + Number(row.events || 0), 0),
+        countriesWithActivity: nonLocal.length,
+        localEvents,
+      },
+      countries: nonLocal,
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Error fetching world map stats" });
+  }
+};
+
 export const getUsageMetrics = async (_req, res) => {
   try {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);

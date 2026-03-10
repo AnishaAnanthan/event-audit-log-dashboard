@@ -11,6 +11,7 @@ const MENU_ITEMS = [
 function FloatingAIAssistant({ onAddWidget }) {
   const [open, setOpen] = useState(false);
   const [activeFeature, setActiveFeature] = useState("");
+  const [featureSnapshots, setFeatureSnapshots] = useState({});
 
   const openFeature = (feature) => {
     setActiveFeature(feature);
@@ -20,6 +21,8 @@ function FloatingAIAssistant({ onAddWidget }) {
     setOpen(false);
     setActiveFeature("");
   };
+
+  const currentSnapshot = activeFeature ? featureSnapshots[activeFeature] : null;
 
   return (
     <>
@@ -73,18 +76,32 @@ function FloatingAIAssistant({ onAddWidget }) {
               </button>
             </div>
             <div className="ai-assistant-content">
-              <AISecurity mode="widget" activeFeature={activeFeature} />
+              <AISecurity
+                mode="widget"
+                activeFeature={activeFeature}
+                onResultChange={(snapshot) =>
+                  setFeatureSnapshots((prev) => ({
+                    ...prev,
+                    [activeFeature]: snapshot || null,
+                  }))
+                }
+              />
             </div>
             <div className="ai-assistant-toolbar bottom">
               <button
                 type="button"
                 className="btn-secondary compact-btn ai-add-dashboard-btn"
                 onClick={() => {
-                  onAddWidget?.(activeFeature);
+                  if (!currentSnapshot) return;
+                  onAddWidget?.({
+                    feature: activeFeature,
+                    snapshot: currentSnapshot,
+                  });
                   closePanel();
                 }}
                 title="Add to Dashboard"
                 aria-label="Add to Dashboard"
+                disabled={!currentSnapshot}
               >
                 Add to Dashboard
               </button>

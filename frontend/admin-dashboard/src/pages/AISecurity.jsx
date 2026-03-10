@@ -25,8 +25,9 @@ ChartJS.register(
   Legend
 );
 
-function AISecurity({ mode = "page", activeFeature = "all" }) {
+function AISecurity({ mode = "page", activeFeature = "all", onResultChange = null, snapshot = null }) {
   const { API, token } = useContext(AuthContext);
+  const isSnapshotMode = mode === "snapshot" && Boolean(snapshot);
 
   const [insightQuery, setInsightQuery] = useState("Show risk spikes this week.");
   const [insightResult, setInsightResult] = useState(null);
@@ -161,10 +162,76 @@ function AISecurity({ mode = "page", activeFeature = "all" }) {
 
   const showFeature = (featureKey) => activeFeature === "all" || activeFeature === featureKey;
 
+  useEffect(() => {
+    if (activeFeature !== "insight" || typeof onResultChange !== "function") return;
+    if (!insightResult) {
+      onResultChange(null);
+      return;
+    }
+    onResultChange({
+      feature: "insight",
+      dynamicTitle: `Visualization for ${String(insightQuery || "insights").trim()}`,
+      toolsUsed: insightResult?.toolsUsed || [],
+      payload: {
+        query: insightQuery,
+        result: insightResult,
+        showChart: true,
+      },
+    });
+  }, [activeFeature, onResultChange, insightResult, insightQuery]);
+
+  useEffect(() => {
+    if (activeFeature !== "summary" || typeof onResultChange !== "function") return;
+    if (!summary) {
+      onResultChange(null);
+      return;
+    }
+    onResultChange({
+      feature: "summary",
+      dynamicTitle: `Threat summary (${String(summary?.risk_level || "MEDIUM").toUpperCase()})`,
+      toolsUsed: summary?.toolsUsed || [],
+      payload: { summary },
+    });
+  }, [activeFeature, onResultChange, summary]);
+
+  useEffect(() => {
+    if (activeFeature !== "query" || typeof onResultChange !== "function") return;
+    if (!queryResult) {
+      onResultChange(null);
+      return;
+    }
+    onResultChange({
+      feature: "query",
+      dynamicTitle: `Log analysis: ${String(query || "AI Query").trim().slice(0, 56)}`,
+      toolsUsed: queryResult?.toolsUsed || [],
+      payload: { query, result: queryResult },
+    });
+  }, [activeFeature, onResultChange, queryResult, query]);
+
+  useEffect(() => {
+    if (activeFeature !== "triage" || typeof onResultChange !== "function") return;
+    if (!triageResult) {
+      onResultChange(null);
+      return;
+    }
+    const alertLabel = String(triageResult?.alert?.type || triageResult?.triage?.severity_classification || alertId || "alert");
+    onResultChange({
+      feature: "triage",
+      dynamicTitle: `Alert triage: ${alertLabel.replaceAll("_", " ")}`,
+      toolsUsed: triageResult?.toolsUsed || [],
+      payload: { alertId, result: triageResult },
+    });
+  }, [activeFeature, onResultChange, triageResult, alertId]);
+
+  if (isSnapshotMode) {
+    return <AISnapshotView snapshot={snapshot} />;
+  }
+
   return (
     <div className={`ai-security-grid ai-page ${mode === "page" ? "ai-cards-grid" : "ai-widget-grid"}`}>
       {showFeature("insight") && <div className="ai-card-slot">
       <SectionCard title="AI Insight Cards">
+        <div className="ai-feature-subtitle">Generate quick insight cards and optional charts from your query.</div>
         <form onSubmit={handleGenerateInsights} className="ai-form-grid">
           <textarea
             value={insightQuery}
@@ -245,6 +312,7 @@ function AISecurity({ mode = "page", activeFeature = "all" }) {
           </button>
         }
       >
+        <div className="ai-feature-subtitle">Summarized risk level and recommended next actions from current data.</div>
         {summaryLoading && (
           <div className="ai-inline-loader-wrap">
             <span className="ai-inline-loader" />
@@ -276,6 +344,7 @@ function AISecurity({ mode = "page", activeFeature = "all" }) {
 
       {showFeature("query") && <div className="ai-card-slot">
       <SectionCard title="AI Log Query Assistant">
+        <div className="ai-feature-subtitle">Ask natural-language questions and get structured log answers.</div>
         <form onSubmit={handleQuery} className="ai-form-grid">
           <textarea
             value={query}
@@ -319,6 +388,7 @@ function AISecurity({ mode = "page", activeFeature = "all" }) {
 
       {showFeature("triage") && <div className="ai-card-slot">
       <SectionCard title="AI Alert Triage">
+        <div className="ai-feature-subtitle">Analyze an alert and get severity, explanation, and recommended action.</div>
         <form onSubmit={handleTriage} className="ai-form-grid">
           <select
             value={alertId}
@@ -500,6 +570,109 @@ function ToolUsage({ tools = [] }) {
             {tool.toolName}
           </span>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AISnapshotView({ snapshot }) {
+  const feature = snapshot?.feature || "";
+  const payload = snapshot?.payload || {};
+  const tools = Array.isArray(snapshot?.toolsUsed) ? snapshot.toolsUsed : [];
+
+  return (
+    <div className="ai-security-grid ai-widget-grid">
+      <div className="ai-card-slot">
+        <SectionCard>
+          {feature === "insight" && (
+            <div className="ai-response-card">
+              <div className="ai-k">Top Findings</div>
+              <ul style={{ margin: "0.5rem 0 0.75rem", paddingLeft: "1.1rem" }}>
+                {(payload?.result?.findings || []).map((finding, idx) => (
+                  <li key={`${idx}-${finding}`}>{finding}</li>
+                ))}
+              </ul>
+              <div className="ai-k">Suggested Chart</div>
+              <p style={{ margin: "0.5rem 0 0.5rem" }}>
+                <strong>{payload?.result?.suggestedChart?.title || "Risk Trend"}</strong>
+                {" - "}
+                {String(payload?.result?.suggestedChart?.type || "line").toUpperCase()}
+              </p>
+              <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+                {payload?.result?.suggestedChart?.reason || "Generated from current audit context."}
+              </p>
+              {payload?.result?.chartData && (
+                <InsightChartRenderer
+                  type={payload?.result?.suggestedChart?.type}
+                  chartData={payload?.result?.chartData}
+                />
+              )}
+              <ToolUsage tools={tools} />
+            </div>
+          )}
+
+          {feature === "summary" && (
+            <div className="ai-response-card">
+              <div className="ai-kv">
+                <span className="ai-k">Risk Level</span>
+                <span className={`risk-chip risk-${String(payload?.summary?.risk_level || "MEDIUM").toLowerCase()}`}>
+                  {payload?.summary?.risk_level}
+                </span>
+              </div>
+              <p style={{ margin: "0.5rem 0 0.75rem", lineHeight: 1.6 }}>{payload?.summary?.summary}</p>
+              <div className="ai-k">Recommendations</div>
+              <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
+                {(payload?.summary?.recommendations || []).map((rec, idx) => (
+                  <li key={`${idx}-${rec}`}>{rec}</li>
+                ))}
+              </ul>
+              <ToolUsage tools={tools} />
+            </div>
+          )}
+
+          {feature === "query" && (
+            <div className="ai-response-card">
+              <div className="ai-k">Response</div>
+              <p style={{ marginTop: "0.4rem", whiteSpace: "pre-wrap" }}>
+                {normalizeAiText(payload?.result?.response)}
+              </p>
+              {payload?.result?.riskInterpretation && (
+                <>
+                  <div className="ai-k">Risk Interpretation</div>
+                  <p style={{ marginTop: "0.4rem" }}>{payload?.result?.riskInterpretation}</p>
+                </>
+              )}
+              {payload?.result?.data && (
+                <>
+                  <div className="ai-k">Data Snapshot</div>
+                  <QueryDataTable data={payload?.result?.data} />
+                </>
+              )}
+              <ToolUsage tools={tools} />
+            </div>
+          )}
+
+          {feature === "triage" && (
+            <div className="ai-response-card">
+              <div className="ai-k">Classification</div>
+              <div style={{ marginBottom: "0.75rem" }}>
+                <span className={`risk-chip risk-${String(payload?.result?.triage?.severity_classification || "medium").toLowerCase()}`}>
+                  {payload?.result?.triage?.severity_classification}
+                </span>
+              </div>
+              <div className="ai-k">Explanation</div>
+              <p style={{ marginTop: "0.4rem" }}>{payload?.result?.triage?.explanation}</p>
+              <div className="ai-k">Recommended Action</div>
+              <p style={{ marginTop: "0.4rem" }}>{payload?.result?.triage?.recommended_action}</p>
+              {payload?.result?.resolved && (
+                <div className="success-msg" style={{ marginTop: "0.75rem" }}>
+                  Alert resolved by AI workflow.
+                </div>
+              )}
+              <ToolUsage tools={tools} />
+            </div>
+          )}
+        </SectionCard>
       </div>
     </div>
   );

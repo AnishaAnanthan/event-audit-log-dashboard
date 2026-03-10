@@ -31,7 +31,7 @@ function Dashboard({ importMode = false }) {
 }
 
 function DashboardContent({ importMode = false }) {
-  const { API, token, logout } = useContext(AuthContext);
+  const { API, token } = useContext(AuthContext);
   const location = useLocation();
   const navigate = useNavigate();
   const {
@@ -63,7 +63,6 @@ function DashboardContent({ importMode = false }) {
   const [activitySort, setActivitySort] = useState("dateAsc");
   const [geoSort, setGeoSort] = useState("countDesc");
   const [aiWidgets, setAiWidgets] = useState([]);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [uploadSummary, setUploadSummary] = useState(null);
   const [importProfile, setImportProfile] = useState(null);
   const [importDetailPage, setImportDetailPage] = useState(1);
@@ -483,9 +482,18 @@ function DashboardContent({ importMode = false }) {
     [importProfile]
   );
 
-  const handleAddAiWidget = (feature) => {
-    if (!feature) return;
-    setAiWidgets((prev) => [...prev, { id: `${feature}-${Date.now()}-${Math.random()}`, feature }]);
+  const handleAddAiWidget = (payload) => {
+    const feature = payload?.feature || payload;
+    const snapshot = payload?.snapshot || null;
+    if (!feature || !snapshot) return;
+    setAiWidgets((prev) => [
+      ...prev,
+      {
+        id: `${feature}-${Date.now()}-${Math.random()}`,
+        feature,
+        snapshot,
+      },
+    ]);
   };
 
   const removeAiWidget = (id) => {
@@ -500,7 +508,6 @@ function DashboardContent({ importMode = false }) {
       ...(nextEnd ? { importEnd: nextEnd } : {}),
     }).toString();
 
-    setMenuOpen(false);
     clearFilter();
     navigate(`/log-import?${params}`);
   };
@@ -538,70 +545,69 @@ function DashboardContent({ importMode = false }) {
   if (loading) return <LoadingSpinner label="Loading dashboard" className="page-loader" />;
 
   return (
-    <div className={`dashboard-page dashboard-redesign ${menuOpen ? "menu-open" : ""}`}>
+    <div className="dashboard-page dashboard-redesign">
       <div className="dashboard-top-shell">
-        <button type="button" className="dashboard-menu-icon fixed-top-left" aria-label="Menu" onClick={() => setMenuOpen(true)}>
-          {"\u2630"}
-        </button>
-        <div className="dashboard-top-filterbar">
-        <div className="dashboard-top-filter-center">
-          <div className="dashboard-top-filter-label">Global Filter</div>
-          <div className="dashboard-filter-chip-wrap">
-            {filterConditions.length === 0 && <div className="dashboard-filter-empty">No filters applied</div>}
-            {filterConditions.map((condition, index) => (
-              <div key={`${condition.field}-${condition.value}-${index}`} className="dashboard-filter-chip">
-                {index > 0 && <span className="dashboard-filter-chip-logic">{condition.logic}</span>}
-                <span>{formatConditionLabel(condition)}</span>
-                <button
-                  type="button"
-                  onClick={() => removeFilterCondition(index)}
-                  className="dashboard-filter-chip-remove"
-                  aria-label={`Remove ${formatConditionLabel(condition)}`}
-                >
-                  &times;
+        <div className="dashboard-top-bar-split">
+          <div className="dashboard-global-filter-card">
+            <div className="dashboard-filter-row-top">
+              <div className="dashboard-top-filter-label">Global Filter</div>
+              <div className="dashboard-filterbar-actions compact-icons">
+                <button type="button" className="btn btn-secondary icon-btn" onClick={() => queueLogicOperator("AND")} title="AND">
+                  &
+                </button>
+                <button type="button" className="btn btn-secondary icon-btn" onClick={() => queueLogicOperator("OR")} title="OR">
+                  |
+                </button>
+                {pendingLogic && (
+                  <button type="button" className="btn btn-secondary icon-btn" onClick={clearPendingLogic} title="Cancel next">
+                    ×
+                  </button>
+                )}
+                <button type="button" className="btn btn-secondary icon-btn" onClick={clearFilter} title="Reset filter">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
                 </button>
               </div>
-            ))}
-            {pendingLogic && <div className="dashboard-filter-pending">Next: {pendingLogic}</div>}
+            </div>
+            <div className="dashboard-filter-chip-wrap">
+              {filterConditions.length === 0 && <div className="dashboard-filter-empty">No filters applied</div>}
+              {filterConditions.map((condition, index) => (
+                <div key={`${condition.field}-${condition.value}-${index}`} className="dashboard-filter-chip">
+                  {index > 0 && <span className="dashboard-filter-chip-logic">{condition.logic}</span>}
+                  <span>{formatConditionLabel(condition)}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeFilterCondition(index)}
+                    className="dashboard-filter-chip-remove"
+                    aria-label={`Remove ${formatConditionLabel(condition)}`}
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
+              {pendingLogic && <div className="dashboard-filter-pending">Next: {pendingLogic}</div>}
+            </div>
           </div>
-        </div>
-        <div className="dashboard-top-filter-right">
-          <div className="date-range">
-            <input
-              type="date"
-              className="form-input date-input"
-              value={dateRange.start}
-              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-            />
-            <span>-</span>
-            <input
-              type="date"
-              className="form-input date-input"
-              value={dateRange.end}
-              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-            />
+          <div className="dashboard-top-controls">
+            <div className="date-range">
+              <input
+                type="date"
+                className="form-input date-input"
+                value={dateRange.start}
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              />
+              <span>-</span>
+              <input
+                type="date"
+                className="form-input date-input"
+                value={dateRange.end}
+                onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              />
+            </div>
           </div>
-          <div className="dashboard-filterbar-actions compact-icons">
-            <button type="button" className="btn btn-secondary icon-btn" onClick={() => queueLogicOperator("AND")} title="AND">
-              &
-            </button>
-            <button type="button" className="btn btn-secondary icon-btn" onClick={() => queueLogicOperator("OR")} title="OR">
-              |
-            </button>
-            {pendingLogic && (
-              <button type="button" className="btn btn-secondary icon-btn" onClick={clearPendingLogic} title="Cancel next">
-                ×
-              </button>
-            )}
-            <button type="button" className="btn btn-secondary icon-btn" onClick={clearFilter} title="Reset filter">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <polyline points="1 20 1 14 7 14"></polyline>
-                <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
         </div>
       </div>
 
@@ -626,33 +632,6 @@ function DashboardContent({ importMode = false }) {
         </section>
       )}
 
-      {menuOpen && (
-        <>
-          <div className="dashboard-menu-backdrop" onClick={() => { setMenuOpen(false); }} />
-          <aside className="dashboard-floating-menu">
-            <div className="dashboard-floating-menu-title">Menu</div>
-            <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/"); setMenuOpen(false); }}>
-              Dashboard
-            </button>
-            <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/logs"); setMenuOpen(false); }}>
-              Audit Logs
-            </button>
-            <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/alerts"); setMenuOpen(false); }}>
-              Alerts
-            </button>
-            <button
-              type="button"
-              className="dashboard-floating-menu-item"
-              onClick={() => { navigate("/log-import"); setMenuOpen(false); }}
-            >
-              Log Import
-            </button>
-            <button type="button" className="dashboard-floating-menu-item danger" onClick={logout}>
-              Logout
-            </button>
-          </aside>
-        </>
-      )}
 
       {!showImportOnlyUpload && <div className="kpi-row kpi-row-4">
         <StatCard
@@ -953,30 +932,8 @@ function DashboardContent({ importMode = false }) {
         </section>
         )}
 
-        {(!isImportView && (showAlertCard || showGeoCard)) && (
-        <section className={`dashboard-grid-row3 ${(!showAlertCard || !showGeoCard) ? "single-column" : ""}`}>
-          {showAlertCard && <article className="dash-card row3-alerts">
-            <div className="dash-card-header">
-              <h3
-                style={{
-                  margin: 0,
-                  color: "var(--text-primary)",
-                  fontSize: "1.125rem",
-                  fontWeight: "600",
-                  letterSpacing: "-0.01em",
-                }}
-              >
-                Alert Severity
-              </h3>
-            </div>
-            <div className="chart-area">
-              <AlertSeverityDonut
-                alertsOverride={filteredAlerts}
-                summaryOverride={effectiveAlertSummary}
-                onFilterSelect={handleFilterSelect}
-              />
-            </div>
-          </article>}
+        {(!isImportView && (showGeoCard || hasEventData)) && (
+        <section className={`dashboard-grid-row3 ${(!showGeoCard || !hasEventData) ? "single-column" : ""}`}>
           {showGeoCard && <article className="dash-card row3-heatmap">
             <div className="dash-card-header">
               <h3
@@ -988,7 +945,7 @@ function DashboardContent({ importMode = false }) {
                   letterSpacing: "-0.01em",
                 }}
               >
-                Geo Activity Heatmap
+                Global Activity Map
               </h3>
               <select
                 className="form-input compact-input dashboard-sort-select"
@@ -1006,14 +963,35 @@ function DashboardContent({ importMode = false }) {
               eventsOverride={filteredEvents}
               onFilterSelect={handleFilterSelect}
               sortMode={geoSort}
+              fixedView="map"
+            />
+          </article>}
+          {hasEventData && <article className="dash-card row3-heatmap">
+            <div className="dash-card-header">
+              <h3
+                style={{
+                  margin: 0,
+                  color: "var(--text-primary)",
+                  fontSize: "1.125rem",
+                  fontWeight: "600",
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                Activity Heatmap
+              </h3>
+            </div>
+            <GeoHeatmap
+              dateRange={dateRange}
+              eventsOverride={filteredEvents}
+              fixedView="activity"
             />
           </article>}
         </section>
         )}
 
-        {!isImportView && showDistributionCard && (
-        <section className={`dashboard-grid-row4 ${isImportView ? "import-view" : ""}`}>
-          <article className={`dash-card row4-distribution ${isImportView ? "import-distribution-card" : ""}`}>
+        {!isImportView && (showDistributionCard || showAlertCard) && (
+        <section className={`dashboard-grid-row4 dual-row ${(!showDistributionCard || !showAlertCard) ? "single-column" : ""}`}>
+          {showDistributionCard && <article className={`dash-card row4-distribution ${isImportView ? "import-distribution-card" : ""}`}>
             <div className="dash-card-header">
               <h3
                 style={{
@@ -1039,7 +1017,30 @@ function DashboardContent({ importMode = false }) {
                 />
               )}
             </div>
-          </article>
+          </article>}
+
+          {showAlertCard && <article className="dash-card row3-alerts">
+            <div className="dash-card-header">
+              <h3
+                style={{
+                  margin: 0,
+                  color: "var(--text-primary)",
+                  fontSize: "1.125rem",
+                  fontWeight: "600",
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                Alert Severity
+              </h3>
+            </div>
+            <div className="chart-area">
+              <AlertSeverityDonut
+                alertsOverride={filteredAlerts}
+                summaryOverride={effectiveAlertSummary}
+                onFilterSelect={handleFilterSelect}
+              />
+            </div>
+          </article>}
         </section>
         )}
 
@@ -1194,13 +1195,16 @@ function DashboardContent({ importMode = false }) {
               <article key={widget.id} className="dash-card ai-widget-card">
                 <div className="dash-card-header">
                   <h3 style={{ margin: 0, color: "var(--text-primary)", fontSize: "1rem", fontWeight: "600" }}>
-                    AI Widget: {widget.feature}
+                    {widget?.snapshot?.dynamicTitle || `AI ${widget.feature}`}
                   </h3>
-                  <button type="button" className="btn btn-secondary compact-btn" onClick={() => removeAiWidget(widget.id)}>
-                    Remove
-                  </button>
+                  <div className="ai-widget-header-actions">
+                    <span className="ai-generated-badge" title="AI generated" aria-label="AI generated">AI ✦</span>
+                    <button type="button" className="btn btn-secondary compact-btn" onClick={() => removeAiWidget(widget.id)}>
+                      Remove
+                    </button>
+                  </div>
                 </div>
-                <AISecurity mode="widget" activeFeature={widget.feature} />
+                <AISecurity mode="snapshot" activeFeature={widget.feature} snapshot={widget.snapshot} />
               </article>
             ))}
           </section>
@@ -1212,16 +1216,6 @@ function DashboardContent({ importMode = false }) {
 }
 
 function StatCard({ title, value, color, icon, onClick }) {
-  const sparkline = useMemo(() => {
-    const seed = Number(value || 0);
-    const points = Array.from({ length: 12 }, (_, idx) => {
-      const base = 6 + ((seed + idx * 7) % 10);
-      const y = 22 - base;
-      return `${idx * 9},${y}`;
-    }).join(" ");
-    return { points };
-  }, [value]);
-
   return (
     <div
       className="card"
@@ -1248,11 +1242,6 @@ function StatCard({ title, value, color, icon, onClick }) {
         </div>
         <div style={{ fontSize: "1.875rem", fontWeight: "700", color: "#ffffff", lineHeight: "1" }}>
           {value}
-        </div>
-        <div className="kpi-sparkline-wrap">
-          <svg viewBox="0 0 100 24" className="kpi-sparkline" aria-hidden="true">
-            <polyline fill="none" stroke={color} strokeWidth="2" points={sparkline.points} />
-          </svg>
         </div>
       </div>
       <div style={{ color: color, background: `${color}20`, padding: "10px", borderRadius: "var(--radius-md)" }}>

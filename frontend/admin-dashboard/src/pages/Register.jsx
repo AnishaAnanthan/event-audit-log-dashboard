@@ -3,12 +3,15 @@ import { useNavigate, Link } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 
 function Register() {
-  const [formData, setFormData] = useState({ name: "", email: "", password: "" });
+  const [formData, setFormData] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { API } = useContext(AuthContext);
   const navigate = useNavigate();
+  const strongPassword = (value) =>
+    value.length >= 8 && /[A-Z]/.test(value) && /[a-z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -19,9 +22,17 @@ function Register() {
     setError("");
     setSuccess("");
     try {
+      if (formData.password !== formData.confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+      if (!strongPassword(formData.password)) {
+        setError("Password must be 8+ chars with upper, lower, number, and special character.");
+        return;
+      }
       await API.post("/api/auth/admin/register", formData);
-      setSuccess("Admin registered successfully! Redirecting to login...");
-      setTimeout(() => navigate("/login"), 1800);
+      setSuccess("Registration successful. Please verify your email.");
+      setTimeout(() => navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`), 1200);
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed.");
     }
@@ -102,6 +113,44 @@ function Register() {
                     </svg>
                   )}
                 </button>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="confirmPassword">Confirm Password</label>
+              <div className="password-field">
+                <input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? "text" : "password"}
+                  name="confirmPassword"
+                  required
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  className="form-input auth-input"
+                  placeholder="Re-enter password"
+                />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowConfirmPassword((value) => !value)}
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 3l18 18"></path>
+                      <path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"></path>
+                      <path d="M9.88 5.09A10.94 10.94 0 0 1 12 5c5 0 9.27 3.11 11 7-0.64 1.43-1.68 2.73-3 3.82"></path>
+                      <path d="M6.61 6.61C4.62 7.89 3.12 9.79 2 12c1.73 3.89 6 7 10 7 1.61 0 3.17-0.36 4.61-1.02"></path>
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                  )}
+                </button>
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "#9bb0cf", marginTop: "6px" }}>
+                Use 8+ chars with upper, lower, number, and special character.
               </div>
             </div>
             <button type="submit" className="btn-primary auth-submit-btn">Register Admin</button>

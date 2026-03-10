@@ -1,18 +1,20 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
+import { ThemeContext } from "../context/ThemeContext";
 
 function DashboardLayout() {
-  const { admin, logout, API, token } = useContext(AuthContext);
+  const { admin, logout } = useContext(AuthContext);
+  const { theme } = useContext(ThemeContext);
   const location = useLocation();
   const navigate = useNavigate();
   const isDashboardHome = location.pathname === "/";
   const isImportPage = location.pathname.startsWith("/log-import");
   const isLogsPage = location.pathname.startsWith("/logs");
   const isAlertsPage = location.pathname.startsWith("/alerts");
-  const useDarkShell = isDashboardHome || isImportPage || isLogsPage || isAlertsPage;
+  const useDarkShell = theme === "dark" && (isDashboardHome || isImportPage || isLogsPage || isAlertsPage);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const profileRef = useRef(null);
 
   const navItems = [
@@ -35,25 +37,12 @@ function DashboardLayout() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleDeleteAccount = async () => {
-    const confirmed = window.confirm("Delete this admin account permanently?");
-    if (!confirmed) return;
-    try {
-      setDeleting(true);
-      await API.delete("/api/auth/account", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      await logout();
-      navigate("/login");
-    } catch (error) {
-      alert(error?.response?.data?.message || "Failed to delete account");
-    } finally {
-      setDeleting(false);
-    }
-  };
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
 
   return (
-    <div className={`dashboard-layout ${useDarkShell ? "dashboard-layout-dark" : ""}`}>
+    <div className={`dashboard-layout ${useDarkShell ? "dashboard-layout-dark" : ""} ${menuOpen ? "menu-open" : ""}`}>
       <aside className={`sidebar ${useDarkShell ? "sidebar-dark" : ""}`}>
         <div className="sidebar-brand-wrap">
           <div className="sidebar-brand">
@@ -94,11 +83,22 @@ function DashboardLayout() {
 
       <main className={`main-content ${useDarkShell ? "main-content-dark-dashboard" : ""}`}>
         <header className={`topbar ${useDarkShell ? "topbar-dark" : ""}`}>
-          <h1 className="topbar-title">
-            {navItems.find((i) => isActivePath(i.path))?.label || "Dashboard"}
-          </h1>
-          
-          <div className="topbar-profile" ref={profileRef}>
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="dashboard-menu-icon header-menu-btn"
+              aria-label="Menu"
+              onClick={() => setMenuOpen(true)}
+            >
+              {"\u2630"}
+            </button>
+            <h1 className="topbar-title">
+              {navItems.find((i) => isActivePath(i.path))?.label || "Dashboard"}
+            </h1>
+          </div>
+
+          <div className="topbar-right">
+            <div className="topbar-profile" ref={profileRef}>
             <button
               type="button"
               className="topbar-user-wrap topbar-user-button"
@@ -117,18 +117,53 @@ function DashboardLayout() {
                 <div className="profile-popover-title">{admin?.name}</div>
                 <div className="profile-popover-sub">Role: {admin?.role || "admin"}</div>
                 <div className="profile-popover-sub">Email: {admin?.email || "N/A"}</div>
-                <button
-                  type="button"
-                  onClick={handleDeleteAccount}
-                  disabled={deleting}
-                  className="profile-popover-delete-btn"
-                >
-                  {deleting ? "Deleting..." : "Delete Account"}
-                </button>
               </div>
             )}
+            </div>
           </div>
         </header>
+
+        {menuOpen && (
+          <>
+            <div
+              className="dashboard-menu-backdrop"
+              onClick={() => setMenuOpen(false)}
+              style={{ position: "fixed", inset: 0, zIndex: 900 }}
+            />
+            <aside
+              className="dashboard-floating-menu"
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                bottom: 0,
+                width: "min(340px, 90vw)",
+                height: "100dvh",
+                zIndex: 901,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "auto",
+              }}
+            >
+              <div className="dashboard-floating-menu-title">Menu</div>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/"); setMenuOpen(false); }}>
+                Dashboard
+              </button>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/logs"); setMenuOpen(false); }}>
+                Audit Logs
+              </button>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/alerts"); setMenuOpen(false); }}>
+                Alerts
+              </button>
+              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/log-import"); setMenuOpen(false); }}>
+                Log Import
+              </button>
+              <button type="button" className="dashboard-floating-menu-item danger" onClick={logout}>
+                Logout
+              </button>
+            </aside>
+          </>
+        )}
 
         <Outlet />
       </main>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
 import SectionCard from "../components/ui/SectionCard";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { Doughnut } from "react-chartjs-2";
 import { ArcElement, Chart as ChartJS, Legend, Tooltip } from "chart.js";
 
@@ -33,9 +33,8 @@ const DONUT_DEFS = [
 ];
 
 function Logs() {
-  const { API, token, logout } = useContext(AuthContext);
+  const { API, token } = useContext(AuthContext);
   const location = useLocation();
-  const navigate = useNavigate();
   const [logs, setLogs] = useState([]);
   const [summaryLogs, setSummaryLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -51,7 +50,6 @@ function Logs() {
   const [totalPages, setTotalPages] = useState(1);
   const [roleScope, setRoleScope] = useState("ALL");
   const [selectedUser, setSelectedUser] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
   const importSessionId = useMemo(
     () => new URLSearchParams(location.search).get("importSessionId") || "",
     [location.search]
@@ -249,44 +247,6 @@ function Logs() {
   return (
     <SectionCard className="audit-logs-redesign">
       <div className="audit-layout-grid">
-        <div className="dashboard-top-shell audit-top-shell">
-          <button
-            type="button"
-            className="dashboard-menu-icon fixed-top-left"
-            aria-label="Menu"
-            onClick={() => setMenuOpen(true)}
-          >
-            {"\u2630"}
-          </button>
-        </div>
-
-        {menuOpen && (
-          <>
-            <div className="dashboard-menu-backdrop" onClick={() => { setMenuOpen(false); }} />
-            <aside className="dashboard-floating-menu">
-              <div className="dashboard-floating-menu-title">Menu</div>
-              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/"); setMenuOpen(false); }}>
-                Dashboard
-              </button>
-              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/logs"); setMenuOpen(false); }}>
-                Audit Logs
-              </button>
-              <button type="button" className="dashboard-floating-menu-item" onClick={() => { navigate("/alerts"); setMenuOpen(false); }}>
-                Alerts
-              </button>
-              <button
-                type="button"
-                className="dashboard-floating-menu-item"
-                onClick={() => { navigate("/log-import"); setMenuOpen(false); }}
-              >
-                Log Import
-              </button>
-              <button type="button" className="dashboard-floating-menu-item danger" onClick={logout}>
-                Logout
-              </button>
-            </aside>
-          </>
-        )}
 
         <section className="audit-donut-summary">
           <div className="audit-donut-row">
@@ -442,12 +402,9 @@ function Logs() {
         )}
 
         <section className="audit-user-flow">
-          <div className="audit-flow-column">
-            <div className="audit-flow-line from-table curve" />
-            <div className="audit-center-node">
-              {selectedUser || "Selected user"}
-            </div>
-            <div className="audit-flow-line to-detail curve" />
+          <div className="audit-selected-user-header">
+            <div className="audit-selected-user-label">Selected User</div>
+            <div className="audit-selected-user-pill">{selectedUser || "No user selected"}</div>
           </div>
           <div className="audit-selected-actions">
             <button type="button" className="btn-secondary compact-btn" onClick={handleExportSelectedCsv} disabled={!selectedUserDetails.length}>
