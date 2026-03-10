@@ -108,9 +108,12 @@ export const register = async (req, res) => {
 
     await logEvent("USER_REGISTERED", { req, userId: user._id, data: { email } });
 
-    await sendVerificationEmail(email, otp);
-
+    // Don't block the response on SMTP (Render cold starts / email delays can make the UI feel stuck).
     res.status(201).json({ message: "Registration successful. Please verify your email." });
+
+    sendVerificationEmail(email, otp).catch((error) => {
+      console.error("sendVerificationEmail failed (register):", error);
+    });
   } catch (error) {
     if (error?.code === 11000) {
       return res.status(400).json({ message: "User already exists" });
@@ -222,8 +225,13 @@ export const adminRegister = async (req, res) => {
     });
     
     await logEvent("ADMIN_REGISTERED", { req, userId: user._id, data: { email } });
-    await sendVerificationEmail(email, otp);
+
+    // Don't block the response on SMTP (Render cold starts / email delays can make the UI feel stuck).
     res.status(201).json({ message: "Registration successful. Please verify your email." });
+
+    sendVerificationEmail(email, otp).catch((error) => {
+      console.error("sendVerificationEmail failed (adminRegister):", error);
+    });
   } catch (error) {
     if (error?.code === 11000) {
       return res.status(400).json({ message: "User already exists" });
