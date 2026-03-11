@@ -31,8 +31,8 @@ function Register() {
         return;
       }
       await API.post("/api/auth/admin/register", formData);
-      setSuccess("Registration successful. Please verify your email.");
-      setTimeout(() => navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`), 1200);
+      setSuccess("Registration successful. You can now log in.");
+      setTimeout(() => navigate("/login"), 1200);
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed.");
     }
